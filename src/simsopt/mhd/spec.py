@@ -1069,7 +1069,7 @@ class Residue(Optimizable):
         rtol: the relative tolerance of the integrator
     """
 
-    def __init__(self, spec, pp, qq, vol=1, theta=0, s_guess=None, s_min=-1.0,
+    def __init__(self, spec, pp, qq, vol=1, theta=0., s_guess=None, s_min=-1.0,
                  s_max=1.0, rtol=1e-9):
         # if not spec_found:
         if spec is None:
