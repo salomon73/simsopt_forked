@@ -421,6 +421,15 @@ class SpecTests(unittest.TestCase):
             self.assertAlmostEqual(equil.iota(), -0.4114567, places=3)
             self.assertAlmostEqual(prob.objective(), 7.912501330E-04, places=3)
 
+    def test_freeboundary_vs_coil_field(self)
+        """
+        This test evaluates the Vns components from a coil set on the computational 
+        boundary and creates a 1-volume SPEC vacuum equilibrium. 
+        It then compares a field line trace using Biot-savart from the coils directly
+        with the field line trace from the SPEC equilibrium.
+        """
+        pass
+
     @unittest.skipIf((not spec_found) or (not pyoculus_found),
                      "SPEC python module or pyoculus not found")
     def test_residue(self):

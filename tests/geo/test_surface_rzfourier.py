@@ -704,7 +704,40 @@ class SurfaceRZFourierTests(unittest.TestCase):
             self.assertAlmostEqual(s2.area(), surf_objs[1].area())
             self.assertIs(surf_objs[0].dofs, surf_objs[1].dofs)
 
+    def test_fourier_transform_field(self):
+        """
+        Test the Fourier transform of a field on a surface.
+        """
+        s = SurfaceRZFourier(mpol=4, ntor=5)
+        s.rc[0, 0] = 1.3
+        s.rc[1, 0] = 0.4
+        s.zs[1, 0] = 0.2
 
+        # Create a field evaluated on the quadpoints:
+        phi2d, theta2d = np.meshgrid(2 * np.pi * s.quadpoints_phi, 
+                                    2 * np.pi * s.quadpoints_theta)
+
+        # create a test field where only Fourier elements [m=2, n=3] 
+        # and [m=4,n=5] are nonzero:
+        field = []
+        for phi, theta in zip(phi2d.flatten(), theta2d.flatten()):
+            field.append( 0.8* np.sin(2*theta - 3*s.nfp*phi) + 0.2*np.sin(4*theta - 5*s.nfp*phi)
+                         + 0.7*np.cos(3*theta - 3*s.nfp*phi) )
+        field = np.array(field).reshape(phi2d.shape)
+
+
+        # Transform the field to Fourier space:
+        ft_sines, ft_cosines = s.fourier_transform_field(field, stellsym=False)
+        self.assertAlmostEqual(ft_sines[2, 3+s.ntor], 0.8)
+        self.assertAlmostEqual(ft_sines[4, 5+s.ntor], 0.2)
+        self.assertAlmostEqual(ft_cosines[3, 3+s.ntor], 0.7)
+
+        # Transform back to real space:
+        field2 = s.inverse_fourier_transform_field(ft_sines, ft_cosines, stellsym=False)
+
+        # Check that the result is the same as the original field:
+        np.testing.assert_allclose(field, field2)
+        
 class SurfaceRZPseudospectralTests(unittest.TestCase):
     def test_names(self):
         """

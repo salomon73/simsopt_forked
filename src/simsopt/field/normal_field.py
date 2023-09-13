@@ -103,16 +103,16 @@ class NormalField(Optimizable):
         else:
             vnc = np.asarray(ph['vnc'][1:])
 
-        nf = cls(
+        normal_field = cls(
             nfp=ph['nfp'], 
-            stellsym=ph['istellsym'], 
+            stellsym=bool(ph['istellsym']), 
             mpol=ph['Mpol'], 
             ntor=ph['Ntor'],
             vns=vns,
             vnc=vnc
         )
 
-        return nf
+        return normal_field
 
     def get_index_in_dofs(self, m, n, mpol=None, ntor=None, even=False):
         """
@@ -287,3 +287,124 @@ class NormalField(Optimizable):
                     fn(f'vns({m},{n})')
                 if not self.stellsym:
                     fn(f'vnc({m},{n})')
+
+    def get_vns_asarray(self, mpol=None, ntor=None):
+        """
+        Return the vns as a single array
+        """
+        if mpol == None:
+            mpol = self.mpol
+        elif mpol > self.mpol:
+            raise ValueError('mpol out of bound')
+
+        if ntor == None: 
+            ntor = self.ntor
+        elif ntor > self.ntor:
+            raise ValueError('ntor out of bound')
+
+
+        vns = np.zeros((mpol + 1, 2 * ntor + 1))
+        for mm in range(0, mpol + 1):
+            for nn in range(-ntor, ntor + 1):
+                if mm == 0 and nn < 0: continue
+                vns[mm, ntor + nn] = self.get_vns(mm, nn)
+
+        return vns
+    
+    def get_vnc_asarray(self, mpol=None, ntor=None):
+        """
+        Return the vnc as a single array
+        """
+        if mpol == None:
+            mpol = self.mpol
+        elif mpol > self.mpol:
+            raise ValueError('mpol out of bound')
+
+        if ntor == None: 
+            ntor = self.ntor
+        elif ntor > self.ntor:
+            raise ValueError('ntor out of bound')
+
+        vnc = np.zeros((mpol + 1, 2 * ntor + 1))
+        for mm in range(0, mpol + 1):
+            for nn in range(-ntor, ntor + 1):
+                if mm == 0 and nn < 0: continue
+                vnc[mm, ntor + nn] = self.get_vnc(mm, nn)
+
+        return vnc
+    
+    def get_vns_vnc_asarray(self, mpol, ntor):
+        """
+        Return the vns and vnc as two arrays single array
+        """
+        if mpol == None:
+            mpol = self.mpol
+        elif mpol > self.mpol:
+            raise ValueError('mpol out of bound')
+
+        if ntor == None: 
+            ntor = self.ntor
+        elif ntor > self.ntor:
+            raise ValueError('ntor out of bound')
+        
+        vns = self.get_vns_asarray(mpol, ntor)
+        vnc = self.get_vnc_asarray(mpol, ntor)
+        return vns, vnc
+    
+    def set_vns_asarray(self, vns, mpol=None, ntor=None):
+        """
+        Set the vns from a single array
+        """
+        if mpol == None:
+            mpol = self.mpol
+        elif mpol > self.mpol:
+            raise ValueError('mpol out of bound')
+
+        if ntor == None: 
+            ntor = self.ntor
+        elif ntor > self.ntor:
+            raise ValueError('ntor out of bound')
+
+        for mm in range(0, mpol + 1):
+            for nn in range(-ntor, ntor + 1):
+                if mm == 0 and nn < 0: continue
+                self.set_vns(mm, nn, vns[mm, ntor + nn])
+
+    def set_vnc_asarray(self, vnc, mpol=None, ntor=None):
+        """
+        Set the vnc from a single array
+        """
+        if mpol == None:
+            mpol = self.mpol
+        elif mpol > self.mpol:
+            raise ValueError('mpol out of bound')
+
+        if ntor == None: 
+            ntor = self.ntor
+        elif ntor > self.ntor:
+            raise ValueError('ntor out of bound')
+
+        for mm in range(0, mpol + 1):
+            for nn in range(-ntor, ntor + 1):
+                if mm == 0 and nn < 0: continue
+                self.set_vnc(mm, nn, vnc[mm, ntor + nn])
+    
+    def set_vns_vnc_asarray(self, vns, vnc, mpol=None, ntor=None):
+        """
+        Set the vns and vnc from two single arrays
+        """
+        if mpol == None:
+            mpol = self.mpol
+        elif mpol > self.mpol:
+            raise ValueError('mpol out of bound')
+
+        if ntor == None: 
+            ntor = self.ntor
+        elif ntor > self.ntor:
+            raise ValueError('ntor out of bound')
+
+        self.set_vns_asarray(vns, mpol, ntor)
+        self.set_vnc_asarray(vnc, mpol, ntor)
+
+
+
