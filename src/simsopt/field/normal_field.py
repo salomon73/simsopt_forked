@@ -101,12 +101,12 @@ class NormalField(Optimizable):
         if ph['istellsym']:
             vnc = None
         else:
-            vnc = np.asarray(ph['vnc'][1:])
+            vnc = np.asarray(ph['vnc'])
 
         normal_field = cls(
-            nfp=ph['nfp'], 
-            stellsym=bool(ph['istellsym']), 
-            mpol=ph['Mpol'], 
+            nfp=ph['nfp'],
+            stellsym=bool(ph['istellsym']),
+            mpol=ph['Mpol'],
             ntor=ph['Ntor'],
             vns=vns,
             vnc=vnc
