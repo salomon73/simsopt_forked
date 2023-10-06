@@ -133,7 +133,9 @@ class LeastSquaresProblem(Optimizable):
                 each tuple (the specified order matters).
         """
         funcs_in, goals, weights = zip(*tuples)
-        return cls(goals, weights, funcs_in=funcs_in, fail=fail)
+        goal_array =  np.concatenate([np.ravel(x) for x in goals])
+        weigth_array =  np.concatenate([np.ravel(x) for x in weights])
+        return cls(goal_array, weigth_array, funcs_in=funcs_in, fail=fail)
 
     def unweighted_residuals(self, x=None, *args, **kwargs):
         """
