@@ -245,6 +245,33 @@ class Spec(Optimizable):
                                                             m + si.mmpol]
         self._boundary.local_full_x = self._boundary.get_dofs()
 
+        # If the equilibrium is freeboundary, we need to read the computational
+        # boundary as well. Otherwise set the outermost boundary as the
+        # computational boundary. 
+        if si.lfreebound:
+            self._computational_boundary = SurfaceRZFourier(nfp=si.nfp,
+                                                            stellsym=stellsym,
+                                                            mpol=si.mpol,
+                                                            ntor=si.ntor)
+            for m in range(si.mpol + 1):
+                for n in range(-si.ntor, si.ntor + 1):
+                    self._computational_boundary.rc[m,
+                                                    n + si.ntor] = si.rwc[n + si.mntor,
+                                                                          m + si.mmpol]
+                    self._computational_boundary.zs[m,
+                                                    n + si.ntor] = si.zws[n + si.mntor,
+                                                                          m + si.mmpol]
+                    if not stellsym:
+                        self._computational_boundary.rs[m,
+                                                        n + si.ntor] = si.rws[n + si.mntor,
+                                                                              m + si.mmpol]
+                        self._computational_boundary.zc[m,
+                                                        n + si.ntor] = si.zwc[n + si.mntor,
+                                                                              m + si.mmpol]
+            self._computational_boundary.fix_all()  # computational boundary is not moved!
+        else:  # in non-free-boundary case, computational boundary is the same as the plasma boundary
+            self._computational_boundary = self._boundary 
+
         self.need_to_run_code = True
         self.counter = -1
 
@@ -290,6 +317,18 @@ class Spec(Optimizable):
             SurfaceRZFourier instance representing the plasma boundary
         """
         return self._boundary
+
+    @property
+    def computational_boundary(self):
+        """
+        Getter for the computational boundary. 
+        Same as the plasma boundary in the non-free-boundary case, 
+        gives the surface on which Vns and Vnc are defined in the free-boundary case.
+
+        Returns:
+            SurfaceRZFourier instance representing the plasma boundary
+        """
+        return self._computational_boundary
 
     @property
     def pressure_profile(self):

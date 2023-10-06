@@ -672,7 +672,7 @@ class SurfaceRZFourierTests(unittest.TestCase):
 
         s2 = SurfaceRZFourier.from_other_surface(s, mpol=3, ntor=2, range='field period')
         s3 = SurfaceRZFourier.from_other_surface(s2, nfp=4, ntheta=100, nphi=100, range='half period')
-        s4 = SurfaceRZFourier.from_other_surface(s3, nfp=s.nfp,  range='full torus')
+        s4 = SurfaceRZFourier.from_other_surface(s3, nfp=s.nfp, range='full torus')
         self.assertAlmostEqual(s.area(), s4.area(), places=4)
         self.assertAlmostEqual(s.volume(), s4.volume(), places=3)
 
@@ -713,18 +713,18 @@ class SurfaceRZFourierTests(unittest.TestCase):
         s.rc[1, 0] = 0.4
         s.zs[1, 0] = 0.2
 
-        # Create a field evaluated on the quadpoints:
-        phi2d, theta2d = np.meshgrid(2 * np.pi * s.quadpoints_phi, 
-                                    2 * np.pi * s.quadpoints_theta)
+        # Create the grid of quadpoints:
+        phi2d, theta2d = np.meshgrid(2 * np.pi * s.quadpoints_phi,
+                                     2 * np.pi * s.quadpoints_theta, 
+                                     indexing='ij')
 
         # create a test field where only Fourier elements [m=2, n=3] 
         # and [m=4,n=5] are nonzero:
         field = []
         for phi, theta in zip(phi2d.flatten(), theta2d.flatten()):
-            field.append( 0.8* np.sin(2*theta - 3*s.nfp*phi) + 0.2*np.sin(4*theta - 5*s.nfp*phi)
-                         + 0.7*np.cos(3*theta - 3*s.nfp*phi) )
+            field.append(0.8 * np.sin(2*theta - 3*s.nfp*phi) + 0.2*np.sin(4*theta - 5*s.nfp*phi)
+                         + 0.7*np.cos(3*theta - 3*s.nfp*phi))
         field = np.array(field).reshape(phi2d.shape)
-
 
         # Transform the field to Fourier space:
         ft_sines, ft_cosines = s.fourier_transform_field(field, stellsym=False)
@@ -732,12 +732,22 @@ class SurfaceRZFourierTests(unittest.TestCase):
         self.assertAlmostEqual(ft_sines[4, 5+s.ntor], 0.2)
         self.assertAlmostEqual(ft_cosines[3, 3+s.ntor], 0.7)
 
+        # Test that all other elements are close to zero
+        sines_mask = np.ones_like(ft_sines, dtype=bool)
+        cosines_mask = sines_mask
+        sines_mask[2, 3 + s.ntor] = False
+        sines_mask[4, 5 + s.ntor] = False
+        cosines_mask[3, 3 + s.ntor] = False
+        self.assertEqual(np.all(np.abs(ft_sines[sines_mask]) < 1e-10), True)
+        self.assertEqual(np.all(np.abs(ft_cosines[cosines_mask]) < 1e-10), True)
+
         # Transform back to real space:
         field2 = s.inverse_fourier_transform_field(ft_sines, ft_cosines, stellsym=False)
 
         # Check that the result is the same as the original field:
         np.testing.assert_allclose(field, field2)
-        
+
+
 class SurfaceRZPseudospectralTests(unittest.TestCase):
     def test_names(self):
         """

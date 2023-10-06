@@ -302,11 +302,10 @@ class NormalField(Optimizable):
         elif ntor > self.ntor:
             raise ValueError('ntor out of bound')
 
-
         vns = np.zeros((mpol + 1, 2 * ntor + 1))
         for mm in range(0, mpol + 1):
             for nn in range(-ntor, ntor + 1):
-                if mm == 0 and nn < 0: continue
+                if mm == 0 and nn <= 0: continue
                 vns[mm, ntor + nn] = self.get_vns(mm, nn)
 
         return vns
@@ -367,7 +366,7 @@ class NormalField(Optimizable):
 
         for mm in range(0, mpol + 1):
             for nn in range(-ntor, ntor + 1):
-                if mm == 0 and nn < 0: continue
+                if mm == 0 and nn <= 0: continue
                 self.set_vns(mm, nn, vns[mm, ntor + nn])
 
     def set_vnc_asarray(self, vnc, mpol=None, ntor=None):
