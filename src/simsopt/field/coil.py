@@ -325,3 +325,33 @@ def coils_to_focus(filename, curves, currents, nfp=1, stellsym=False, Ifree=Fals
                 f.write('\n')
         f.write('\n')
     return
+
+
+class CoilSet(Optimizable):
+    """
+    A set of coils as a single optimizable object. 
+    """
+    from simsopt.field import BiotSavart 
+
+    def __init__(self, base_coils, all_coils, surface=None):  
+        self.coils = all_coils
+        self.bs = BiotSavart(all_coils)
+        if surface is not None:
+            self.bs.set_points(surface.gamma().reshape((-1, 3)))
+
+        Optimizable.__init__(self, depends_on=[base_coils])
+
+    def vjp(self, v_gamma, v_gammadash, v_current):
+        pass
+
+
+
+    def plot(self, **kwargs):
+        """
+        Plot the coil's curve. This method is just shorthand for calling
+        the :obj:`~simsopt.geo.curve.Curve.plot()` function on the
+        underlying Curve. All arguments are passed to
+        :obj:`simsopt.geo.curve.Curve.plot()`
+        """
+        from simsopt.geo.plotting import plot
+        plot(self.coils, **kwargs)
