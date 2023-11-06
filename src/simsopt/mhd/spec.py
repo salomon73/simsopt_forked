@@ -80,7 +80,7 @@ class Spec(Optimizable):
         mpi: A :obj:`simsopt.util.mpi.MpiPartition` instance, from which
           the worker groups will be used for SPEC calculations. If ``None``,
           each MPI process will run SPEC independently.
-        verbose: Whether to print SPEC output to stdout.
+        verbose: Whether to print SPEC output to stdout (and also a few other statements)
         keep_all_files: If ``False``, all output files will be deleted
           except for the first and most recent ones from worker group 0. If
           ``True``, all output files will be kept.
@@ -105,22 +105,16 @@ class Spec(Optimizable):
 
         self.lib = spec
         # For the most commonly accessed fortran modules, provide a
-        # shorthand so ".lib" is not needed:
-        modules = [
-            "inputlist",
-            "allglobal",
-        ]
-        for key in modules:
-            setattr(self, key, getattr(spec, key))
+        # shorthand:
+        setattr(self, "inputlist", getattr(spec, "inputlist"))
+        setattr(self, "allglobal", getattr(spec, "allglobal"))
 
         self.verbose = verbose
         # mute screen output if necessary
-        # TODO: relies on /dev/null being accessible (Windows!)
+        # TODO: mute SPEC in windows, currently relies on /dev/null being accessible
         if not self.verbose:
             self.lib.fileunits.mute(1)
 
-        # python wrapper does not need to write files along the run
-        #self.lib.allglobal.skip_write = True
 
         # If mpi is not specified, use a single worker group:
         if mpi is None:
@@ -147,64 +141,39 @@ class Spec(Optimizable):
             )
         self.tolerance = tolerance
 
-        self.init(filename)
+        # Initialize the FORTRAN state with values in the input file:
+        self.init_fortran_state(filename)
         si = spec.inputlist  # Shorthand
 
-        # Read number of (plasma) volumes
+        # Copy useful and commonly used values from SPEC inputlist to 
+        self.stellsym = bool(si.istellsym)
+        self.freebound = bool(si.lfreebound)
+        self.nfp = si.nfp
+        self.mpol = si.mpol
+        self.ntor = si.ntor
         self.nvol = si.nvol
+        if self.freebound:
+            self.mvol = si.nvol + 1
+        else: 
+            self.mvol = si.nvol
 
-        # Read number of (plasma+vacuum) volumes
-        if si.lfreebound:
-            self.mvol = self.nvol + 1 
-        else:
-            self.mvol = self.nvol
 
         # Store initial guess data
         # The initial guess is a collection of SurfaceRZFourier instances,
         # stored in a list of size Mvol-1 (the number of inner interfaces)
-        nmodes = self.allglobal.num_modes
-        stellsym = bool(si.istellsym)
-        if nmodes > 0 and self.nvol > 1:
-            self.initial_guess = [ 
-                SurfaceRZFourier(nfp=si.nfp, stellsym=stellsym, mpol=si.mpol, ntor=si.ntor) for n in range(0, self.mvol-1)
-            ]
-            for imode in range(0, nmodes):
-                mm = self.allglobal.mmrzrz[imode]
-                nn = self.allglobal.nnrzrz[imode]
-                if mm > si.mpol:
-                    continue
-                if abs(nn) > si.ntor:
-                    continue
-
-                # Populate SurfaceRZFourier instances, except plasma boundary
-                for lvol in range(0, self.nvol-1):
-                    self.initial_guess[lvol].set_rc(mm, nn, self.allglobal.allrzrz[0, lvol, imode])
-                    self.initial_guess[lvol].set_zs(mm, nn, self.allglobal.allrzrz[1, lvol, imode])
-
-                    if not si.istellsym:
-                        self.initial_guess[lvol].set_rs(mm, nn, self.allglobal.allrzrz[2, lvol, imode])
-                        self.initial_guess[lvol].set_zc(mm, nn, self.allglobal.allrzrz[3, lvol, imode])
-
-                if si.lfreebound:  # Populate plasma boundary as well
-                    self.initial_guess[self.nvol-1].set_rc(mm, nn, si.rbc[si.mntor+nn, si.mmpol+mm])
-                    self.initial_guess[self.nvol-1].set_zs(mm, nn, si.zbs[si.mntor+nn, si.mmpol+mm])
-
-                    if not si.istellsym:
-                        self.initial_guess[self.nvol-1].set_rs(mm, nn, si.rbs[si.mntor+nn, si.mmpol+mm])
-                        self.initial_guess[self.nvol-1].set_zc(mm, nn, si.zbc[si.mntor+nn, si.mmpol+mm])
-
+        initial_guess_present = bool(self.allglobal.num_modes > 0 and self.nvol > 1)
+        if initial_guess_present:
+            self.initial_guess = self._read_initial_guess()
             # In general, initial guess is NOT a degree of freedom for the
             # optimization - we thus fix them.
-            for lvol in range(0, self.mvol-1):
-                self.initial_guess[lvol].fix_all()
-
+            for surface in self.initial_guess:
+                surface.fix_all()
         else: 
             # There is no initial guess - in this case, we let SPEC handle
             # the construction of the initial guess. This generally means
             # that the geometry of the inner interfaces will be constructed
             # by interpolation between the plasma (or computational) boundary
             # and the magnetic axis
-
             self.initial_guess = None
 
         # Store axis data
@@ -220,11 +189,10 @@ class Spec(Optimizable):
         self.files_to_delete = []
 
         # Create a surface object for the boundary:
-        logger.debug(f"In __init__, si.istellsym={si.istellsym} stellsym={stellsym}")
-        self._boundary = SurfaceRZFourier(nfp=si.nfp,
-                                          stellsym=stellsym,
-                                          mpol=si.mpol,
-                                          ntor=si.ntor)
+        self._boundary = SurfaceRZFourier(nfp=self.nfp,
+                                          stellsym=self.stellsym,
+                                          mpol=self.mpol,
+                                          ntor=self.ntor)
 
         # Transfer the boundary shape from fortran to the boundary
         # surface object:
@@ -236,7 +204,7 @@ class Spec(Optimizable):
                 self._boundary.zs[m,
                                   n + si.ntor] = si.zbs[n + si.mntor,
                                                         m + si.mmpol]
-                if not stellsym:
+                if not self.stellsym:
                     self._boundary.rs[m,
                                       n + si.ntor] = si.rbs[n + si.mntor,
                                                             m + si.mmpol]
@@ -250,7 +218,7 @@ class Spec(Optimizable):
         # computational boundary. 
         if si.lfreebound:
             self._computational_boundary = SurfaceRZFourier(nfp=si.nfp,
-                                                            stellsym=stellsym,
+                                                            stellsym=self.stellsym,
                                                             mpol=si.mpol,
                                                             ntor=si.ntor)
             for m in range(si.mpol + 1):
@@ -261,7 +229,7 @@ class Spec(Optimizable):
                     self._computational_boundary.zs[m,
                                                     n + si.ntor] = si.zws[n + si.mntor,
                                                                           m + si.mmpol]
-                    if not stellsym:
+                    if not self.stellsym:
                         self._computational_boundary.rs[m,
                                                         n + si.ntor] = si.rws[n + si.mntor,
                                                                               m + si.mmpol]
@@ -307,6 +275,37 @@ class Spec(Optimizable):
         super().__init__(x0=x0, fixed=fixed, names=names,
                          depends_on=depends_on,
                          external_dof_setter=Spec.set_dofs)
+
+    def _read_initial_guess(self):
+        """
+        Read initial guesses from SPEC and create a list of surfaceRZFourier objects.
+        """
+        nmodes = self.allglobal.num_modes
+        interfaces = []    # initialize list
+        for lvol in range(0, self.nvol-1):  # loop over volumes
+            # the fourier comonents of the initial guess are stored in the allrzrz array
+            thissurf_rc = self.allglobal.allrzrz[0, lvol, :nmodes]
+            thissurf_zs = self.allglobal.allrzrz[1, lvol, :nmodes]
+            if not self.stellsym:
+                thissurf_rs = self.allglobal.allrzrz[2, lvol, :nmodes]
+                thissurf_zc = self.allglobal.allrzrz[3, lvol, :nmodes]
+            thissurf = SurfaceRZFourier(nfp=self.nfp, stellsym=self.stellsym,
+                                                        mpol=self.mpol, ntor=self.ntor)
+            # the mode number convention is different in SPEC. Best to use the
+            # in-built array mmrzrz to get the numbers for each fourier component:
+            for imode in range(0, nmodes):
+                mm = self.allglobal.mmrzrz[imode]
+                nn = self.allglobal.nnrzrz[imode]
+                # The guess array cold have more modes than we are running SPEC with, skip if case
+                if mm > self.mpol or abs(nn) > self.ntor:
+                    continue
+                thissurf.set_rc(mm, nn, thissurf_rc[imode])
+                thissurf.set_zs(mm, nn, thissurf_zs[imode])
+                if not self.stellsym:
+                    thissurf.set_rs(mm, nn, thissurf_rs[imode])
+                    thissurf.set_zc(mm, nn, thissurf_zc[imode])
+                interfaces.append(thissurf)
+            return interfaces
 
     @property
     def boundary(self):
@@ -755,7 +754,7 @@ class Spec(Optimizable):
             if p is not None:
                 p.phiedge = x[0]
 
-    def init(self, filename: str):
+    def init_fortran_state(self, filename: str):
         """
         Initialize SPEC fortran state from an input file.
 
@@ -789,6 +788,8 @@ class Spec(Optimizable):
         """
         if not self.need_to_run_code:
             logger.info("run() called but no need to re-run SPEC.")
+            if self.verbose:
+                print("run() called but no need to re-run SPEC.")
             return
         logger.info("Preparing to run SPEC.")
         self.counter += 1
