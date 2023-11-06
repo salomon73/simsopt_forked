@@ -331,20 +331,119 @@ class CoilSet(Optimizable):
     """
     A set of coils as a single optimizable object. 
     """
-    from simsopt.field import BiotSavart 
+    from simsopt.geo import Surface
 
     def __init__(self, base_coils, all_coils, surface=None):  
+        from simsopt.field import BiotSavart 
         self.coils = all_coils
         self.bs = BiotSavart(all_coils)
+        self.surface = surface
         if surface is not None:
             self.bs.set_points(surface.gamma().reshape((-1, 3)))
+        super.__init__(self, depends_on=[base_coils])
 
-        Optimizable.__init__(self, depends_on=[base_coils])
+    @classmethod
+    def for_my_surface(surf: Surface, nfp=None, coils_per_period=4, order=8, R0=None, R1=None, use_stellsym=True, factor=2.): 
+        """
+        Create a CoilSet for a given surface. The coils are created using
+        :obj:`create_equally_spaced_curves` with the given parameters.
 
-    def vjp(self, v_gamma, v_gammadash, v_current):
-        pass
+        Args:
+            surf: The surface for which to create the coils
+            nfp: The number of field periods. 
+            coils_per_period: The number of coils per field period
+            order: The order of the Fourier expansion
+            R0: major radius of a torus on which the initial coils are placed
+            R1: The radius of the coils
+            use_stellsym: Whether to use stellarator symmetry
+        """
+        from simsopt.geo import create_equally_spaced_curves
+        from simsopt.geo import SurfaceRZFourier
+        if nfp is None:
+            nfp = surf.nfp
+        elif nfp != surf.nfp:
+            raise ValueError("nfp must equal surf.nfp")
+        if R0 is None:
+            if type(surf) == SurfaceRZFourier:
+                R0 = surf.get_rc(0, 0) * factor
+            else:
+                #not implemented for all surface types
+                raise ValueError("R0 must be specified for non-Fourier surfaces")
+        if R1 is None:
+            if type(surf) == SurfaceRZFourier:
+                # take the max of the first sine/cosine coeffs and scale
+                R1 = max(surf.get_rc(1, 0), surf.get_zs(1, 0)) * factor
 
-
+        base_curves = create_equally_spaced_curves(coils_per_period, nfp, stellsym=use_stellsym, R0=R0, R1=R1, order=order)
+    
+    
+    @property
+    def flux_penalty(self):
+        """
+        Return the penalty function for the quadratic flux penalty on 
+        the surface
+        """
+        from simsopt.objectives import SquaredFlux
+        return SquaredFlux(self.surface, self.bs)
+    
+    @property
+    def length_penalty(self, TOTAL_LENGTH):
+        """
+        Return a QuadraticPenalty on the total length of the coils 
+        if it is larger than TARGET_LENGTH (do not penalize if shorter)
+        """
+        from simsopt.objectives import CurveLength, QuadraticPenalty
+        # only calculate length of base_coils, others are equal
+        coil_multiplication_factor = len(self.coils) / len(self.base_coils)
+        # summing optimizables makes new optimizables
+        lenth_optimizable  = sum(CurveLength(coil) for coil in self.base_coils)*coil_multiplication_factor
+        # return the penalty function
+        return QuadraticPenalty(lenth_optimizable, TOTAL_LENGTH, "max")
+    
+    @property
+    def distance_penalty(self, DISTANCE_THRESHOLD): 
+        """
+        Return a penalty function for the distance between coils
+        """
+        from simsopt.geo import CurveCurveDistance
+        curves = [coil.curve for coil in self.coils]
+        return CurveCurveDistance(curves, DISTANCE_THRESHOLD, num_basecurves=len(self.base_coils))
+    
+    @property
+    def lp_curvature_penalty(self, CURVATURE_THRESHOLD, p=2):
+        """
+        Return a penalty function on the curvature of the coils that is 
+        the Lp norm of the curvature of the coils. Defaults to L2. 
+        """
+        from simsopt.geo import LpCurveCurvature
+        base_curves = [coil.curve for coil in self.base_coils]
+        return sum(LpCurveCurvature(curve, p, CURVATURE_THRESHOLD) for curve in base_curves)
+    
+    @property
+    def meansquared_curvature_penalty(self):
+        """
+        Return a penalty function on the mean squared curvature of the coils
+        """
+        from simsopt.geo import MeanSquaredCurvature
+        return sum(MeanSquaredCurvature(coil.curve) for coil in self.base_coils)
+    
+    @property 
+    def arc_length_variation_penalty(self):
+        """
+        Return a penalty function on the arc length variation of the coils
+        """
+        from simsopt.geo import ArclengthVariation
+        return sum(ArclengthVariation(coil.curve) for coil in self.base_coils)
+    
+    @property
+    def total_length(self):
+        """
+        Return the total length of the coils
+        """
+        from simsopt.objectives import CurveLength
+        multiplicity = len(self.coils) / len(self.base_coils)
+        return sum(CurveLength(coil.curve) for coil in self.base_coils)*multiplicity
+    
 
     def plot(self, **kwargs):
         """
