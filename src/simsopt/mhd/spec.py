@@ -229,9 +229,11 @@ class Spec(Optimizable):
         # Define normal field - these are the Vns, Vnc harmonics. Can be used as
         # dofs in an optimization
         if self.freebound:
+            vns = self.create_SpecFourierArray(si.vns)
+            vnc = self.create_SpecFourierArray(si.vnc)
             self.normal_field = NormalField(nfp=self.nfp, stellsym=self.stellsym,
                                             mpol=self.mpol, ntor=self.ntor,
-                                            vns=si.vns, vnc=si.vnc, 
+                                            vns=vns.simsoptarray, vnc=vnc.simsoptarray, 
                                             computational_boundary=self._computational_boundary)
         else:
             self.normal_field: Optional[NormalField] = None
@@ -268,9 +270,9 @@ class Spec(Optimizable):
             # the mode number convention is different in SPEC. Best to use the
             # in-built array mmrzrz to get the numbers for each fourier component:
             for imode in range(0, nmodes):
-                mm = self.allglobal.mmrzrz[imode]
+                mm = self.allglobal.mmrzrz[imode] # helper arrays to get index for each mode
                 nn = self.allglobal.nnrzrz[imode]
-                # The guess array cold have more modes than we are running SPEC with, skip if case
+                # The guess array could have more modes than we are running SPEC with, skip if case
                 if mm > self.mpol or abs(nn) > self.ntor:
                     continue
                 thissurf.set_rc(mm, nn, thissurf_rc[imode])
@@ -278,8 +280,8 @@ class Spec(Optimizable):
                 if not self.stellsym:
                     thissurf.set_rs(mm, nn, thissurf_rs[imode])
                     thissurf.set_zc(mm, nn, thissurf_zc[imode])
-                interfaces.append(thissurf)
-            return interfaces
+            interfaces.append(thissurf)
+        return interfaces
         
     def _specarrays_to_surfRZFourier(self, specrc=None, speczs=None, specrs=None, speczc=None): 
         """
@@ -836,6 +838,12 @@ class Spec(Optimizable):
                     si.rbs[n + si.mntor, m + si.mmpol] = boundary_RZFourier.get_rs(m, n)
                     si.zbc[n + si.mntor, m + si.mmpol] = boundary_RZFourier.get_zc(m, n)
 
+        # transfer normal field to fortran:
+        if self.freebound:
+            si.vns[:, :] = self.create_SpecFourierArray(self.normal_field.get_vns_asarray()).simsoptarray
+            si.vns[:, :] = self.create_SpecFourierArray(self.normal_field.get_vns_asarray()).simsoptarray
+
+
         # Set the coordinate axis using the lrzaxis=2 feature:
         si.lrzaxis = 2
 
@@ -1102,6 +1110,81 @@ class Spec(Optimizable):
         """
         self.run()
         return self.results.transform.fiota[1, 0]
+    
+    def create_SpecFourierArray(self, array=None):
+        """
+        create a SpecFourierArray object to help transforming between
+        arrays using SPEC conventions and simsopt conventions.
+        
+        The created class will have properties:
+        - specarray: returns the SPEC array
+        - simsoptarray: returns the simsopt array
+        and setters to set the arrays from either convention.
+        """
+        return Spec.SpecFourierArray(self, array)
+    
+    # Inner class of Spec
+    class SpecFourierArray: 
+        """
+        Helper class to make index-jangling easier and hide away
+        strange SPEC array sizing and indexing conventions.
+
+        SPEC stores Fourier series in a very large zero-padded
+        array with Fortran variable indexing and 'n,m' indexing 
+        convention.
+        In python this means the m=0,n=0 component is at [nmtor,mmpol]. 
+
+
+        """
+        def __init__(self, outer_spec, array): 
+            self._outer_spec = outer_spec
+            self._mmpol = outer_spec.inputlist.mmpol
+            self._mntor = outer_spec.inputlist.mntor
+            if array is None:
+                array = np.zeros((2*self._mntor+1,2*self._mmpol+1))   
+            self._array = np.array(array)
+        
+        @property
+        def specarray(self):
+            return self._array
+        
+        @specarray.setter
+        def specarray(self, array):
+            if array.shape != [2*self.mntor+1, 2*mmpol+1]:
+                raise ValueError('Array size is not consistent witn mmpol and mntor')
+            self._array = array
+
+        @property
+        def simsoptarray(self, ntor=None, mpol=None):
+            """
+            get a simsopt style 'n,m' intexed non-padded array 
+            from the SpecFourierArray.
+            """
+            if ntor is None:
+                ntor = self._outer_spec.ntor
+            if mpol is None:
+                mpol = self._outer_spec.mpol
+            n_start = self._mntor - ntor
+            n_end = self._mntor + ntor + 1
+            m_start = self._mmpol
+            m_end = self._mmpol + mpol + 1
+            return self._array[n_start:n_end, m_start:m_end].transpose()#switch n and m
+        
+        @simsoptarray.setter
+        def simsoptarray(self, array, ntor=None, mpol=None):
+            """
+            set the SpecFourierArray from a simsopt style 'n,m' intexed non-padded array
+            """
+            if ntor is None:
+                ntor = int((array.shape[0]-1)/2)
+            if mpol is None:
+                mpol = array.shape[1]-1
+            n_start = self._mntor - ntor
+            n_end = self._mntor + ntor + 1
+            m_start = self._mmpol
+            m_end = self._mmpol + mpol + 1
+            self._array = np.zeros((2*self._mntor+1,2*self._mmpol+1))
+            self._array[n_start:n_end, m_start:m_end] = array.transpose()
 
 
 class Residue(Optimizable):
@@ -1184,3 +1267,6 @@ class Residue(Optimizable):
             raise ObjectiveFailure("Residue calculation failed")
 
         return self.fixed_point.GreenesResidue
+
+
+    
