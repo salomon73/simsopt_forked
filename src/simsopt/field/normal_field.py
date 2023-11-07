@@ -3,6 +3,7 @@ import logging
 import numpy as np
 
 from .._core.optimizable import DOFs, Optimizable
+from ..geo import SurfaceRZFourier
 
 logger = logging.getLogger(__name__)
 
@@ -19,6 +20,12 @@ class NormalField(Optimizable):
     r"""
     ``NormalField`` represents the magnetic field normal to a toroidal surface, for example the
     computational boundary of SPEC free-boundary.
+
+    It consists a surface (the computational boundary), and a set of Fourier harmonics that. 
+
+    The Fourier harmonics are the degees of freedom, the computational boundary is kept fixed. 
+    The normal field should not be normalized to unit area, i.e. it is the 
+    fourier components of B.(\grad\theta \times \nabla\zeta) on the surface.
 
     Args:
         nfp: The number of field period
@@ -37,7 +44,7 @@ class NormalField(Optimizable):
     """
 
     def __init__(self, nfp=1, stellsym=True, mpol=1, ntor=0,
-                 vns=None, vnc=None):
+                 vns=None, vnc=None, computational_boundary=None):
 
         self.nfp = nfp
         self.stellsym = stellsym
@@ -49,6 +56,11 @@ class NormalField(Optimizable):
 
         if vnc is None and not stellsym:
             vnc = np.zeros((self.mpol + 1, 2 * self.ntor + 1))
+        
+        if computational_boundary is None:
+            computational_boundary = SurfaceRZFourier(nfp=nfp, stellsym=stellsym, mpol=mpol, ntor=ntor)
+        computational_boundary.fix_all()
+        self.computational_boundary = computational_boundary
 
         if self.stellsym:
             self.ndof = self.ntor + self.mpol * (2 * self.ntor + 1)
@@ -82,38 +94,33 @@ class NormalField(Optimizable):
             names=self._make_names())
 
     @classmethod
-    def from_spec(cls, filename):
+    def from_spec_object(cls, spec):
         """
-        Initialize using the harmonics in SPEC input file
+        Initialize using the simsopt SPEC object's attributes
         """
+        if not spec.freebound:
+            raise ValueError('The given SPEC object is not free-boundary')
+        boundary_dict = {'specrc': spec.inputlist.rbc,
+                            'speczs': spec.inputlist.zbs}
+        if not spec.stellsym: 
+            boundary_dict.append({'specrs': spec.inputlist.rbs,
+                                  'speczc': spec.inputlist.zbc})
+        computational_boundary = spec._specarrays_to_surfRZFourier(boundary_dict)
+        
+        # Grab all the attributes from the SPEC object into an input dictionary
+        input_dict = {'nfp': spec.nfp,
+                      'stellsym': spec.stellsym,
+                      'mpol': spec.mpol,
+                      'ntor': spec.ntor,
+                      'vns': spec.inputlist.vns,
+                      'computational_boundary': computational_boundary}
+        if not spec.stellsym:
+            input_dict.append({'vnc': spec.inputlist.vnc})
 
-        # Test if py_spec is available
-        if py_spec is None:
-            raise RuntimeError(
-                "Initialization from Spec requires py_spec to be installed.")
-
-        # Read Namelist
-        nm = py_spec.SPECNamelist(filename)
-        ph = nm['physicslist']
-
-        # Read modes from SPEC input file
-        vns = np.asarray(ph['vns'])
-        if ph['istellsym']:
-            vnc = None
-        else:
-            vnc = np.asarray(ph['vnc'])
-
-        normal_field = cls(
-            nfp=ph['nfp'],
-            stellsym=bool(ph['istellsym']),
-            mpol=ph['Mpol'],
-            ntor=ph['Ntor'],
-            vns=vns,
-            vnc=vnc
-        )
+        normal_field = cls(**input_dict)
 
         return normal_field
-
+    
     def get_index_in_dofs(self, m, n, mpol=None, ntor=None, even=False):
         """
         Returns position of mode (m,n) in dofs array
@@ -193,10 +200,10 @@ class NormalField(Optimizable):
         Form a list of names of the ``vns``, ``vnc``
         """
         if self.stellsym:
-            names = self._make_names_helper(False)
+            names = self._make_names_helper(even=False)
         else:
-            names = np.append(self._make_names_helper(False),
-                              self._make_names_helper(True))
+            names = np.append(self._make_names_helper(even=False),
+                              self._make_names_helper(even=True))
 
         return names
 

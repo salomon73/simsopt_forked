@@ -189,53 +189,24 @@ class Spec(Optimizable):
         self.files_to_delete = []
 
         # Create a surface object for the boundary:
-        self._boundary = SurfaceRZFourier(nfp=self.nfp,
-                                          stellsym=self.stellsym,
-                                          mpol=self.mpol,
-                                          ntor=self.ntor)
-
-        # Transfer the boundary shape from fortran to the boundary
-        # surface object:
-        for m in range(si.mpol + 1):
-            for n in range(-si.ntor, si.ntor + 1):
-                self._boundary.rc[m,
-                                  n + si.ntor] = si.rbc[n + si.mntor,
-                                                        m + si.mmpol]
-                self._boundary.zs[m,
-                                  n + si.ntor] = si.zbs[n + si.mntor,
-                                                        m + si.mmpol]
-                if not self.stellsym:
-                    self._boundary.rs[m,
-                                      n + si.ntor] = si.rbs[n + si.mntor,
-                                                            m + si.mmpol]
-                    self._boundary.zc[m,
-                                      n + si.ntor] = si.zbc[n + si.mntor,
-                                                            m + si.mmpol]
-        self._boundary.local_full_x = self._boundary.get_dofs()
-
+        boundary_arrays = {"specrc": si.rbc,
+                           "speczs": si.zbs}
+        if not self.stellsym: 
+            boundary_arrays.update({"specrs": si.rbs,
+                                    "speczc": si.zbc})
+        self._boundary = self._specarrays_to_surfRZFourier(**boundary_arrays)
+        
         # If the equilibrium is freeboundary, we need to read the computational
         # boundary as well. Otherwise set the outermost boundary as the
         # computational boundary. 
-        if si.lfreebound:
-            self._computational_boundary = SurfaceRZFourier(nfp=si.nfp,
-                                                            stellsym=self.stellsym,
-                                                            mpol=si.mpol,
-                                                            ntor=si.ntor)
-            for m in range(si.mpol + 1):
-                for n in range(-si.ntor, si.ntor + 1):
-                    self._computational_boundary.rc[m,
-                                                    n + si.ntor] = si.rwc[n + si.mntor,
-                                                                          m + si.mmpol]
-                    self._computational_boundary.zs[m,
-                                                    n + si.ntor] = si.zws[n + si.mntor,
-                                                                          m + si.mmpol]
-                    if not self.stellsym:
-                        self._computational_boundary.rs[m,
-                                                        n + si.ntor] = si.rws[n + si.mntor,
-                                                                              m + si.mmpol]
-                        self._computational_boundary.zc[m,
-                                                        n + si.ntor] = si.zwc[n + si.mntor,
-                                                                              m + si.mmpol]
+        if self.freebound:
+            cboundary_arrays = {"specrc": si.rwc,
+                                "speczs": si.zws}
+            if not self.stellsym: 
+                cboundary_arrays.update({"specrs": si.rws,
+                                         "speczc": si.zwc})
+
+            self._computational_boundary = self._specarrays_to_surfRZFourier(**cboundary_arrays)
             self._computational_boundary.fix_all()  # computational boundary is not moved!
         else:  # in non-free-boundary case, computational boundary is the same as the plasma boundary
             self._computational_boundary = self._boundary 
@@ -257,8 +228,11 @@ class Spec(Optimizable):
 
         # Define normal field - these are the Vns, Vnc harmonics. Can be used as
         # dofs in an optimization
-        if si.lfreebound:
-            self.normal_field = NormalField.from_spec(filename)
+        if self.freebound:
+            self.normal_field = NormalField(nfp=self.nfp, stellsym=self.stellsym,
+                                            mpol=self.mpol, ntor=self.ntor,
+                                            vns=si.vns, vnc=si.vnc, 
+                                            computational_boundary=self._computational_boundary)
         else:
             self.normal_field: Optional[NormalField] = None
 
@@ -267,7 +241,7 @@ class Spec(Optimizable):
         x0 = self.get_dofs()
         fixed = np.full(len(x0), True)
         names = ['phiedge', 'curtor']
-        if si.lfreebound:
+        if self.freebound:
             depends_on = [self.normal_field]
         else:
             depends_on = [self._boundary]
@@ -278,7 +252,7 @@ class Spec(Optimizable):
 
     def _read_initial_guess(self):
         """
-        Read initial guesses from SPEC and create a list of surfaceRZFourier objects.
+        Read initial guesses from SPEC and return a list of surfaceRZFourier objects.
         """
         nmodes = self.allglobal.num_modes
         interfaces = []    # initialize list
@@ -306,6 +280,42 @@ class Spec(Optimizable):
                     thissurf.set_zc(mm, nn, thissurf_zc[imode])
                 interfaces.append(thissurf)
             return interfaces
+        
+    def _specarrays_to_surfRZFourier(self, specrc=None, speczs=None, specrs=None, speczc=None): 
+        """
+        Return a SurfaceRZFourier object from a SPEC array.
+
+        The indexing in SPEC arrays is different from the simsopt convention. 
+
+        Calling tip: 
+        boundary_arrays = {specrc: si.rbc, speczs: si.zbs}
+        _specarrays_to_surfRZFourier(**boundary_arrays)
+        """
+        # Transfer the boundary shape from fortran to the boundary
+        # surface object:
+        surface = SurfaceRZFourier(nfp=self.nfp, stellsym=self.stellsym,
+                                      mpol=self.mpol, ntor=self.ntor)
+        mntor = self.inputlist.mntor
+        mmpol = self.inputlist.mmpol
+
+        for m in range(self.mpol + 1):
+            for n in range(-self.ntor, self.ntor + 1):
+                surface.rc[m,
+                                  n + self.ntor] = specrc[n + mntor,
+                                                        m + mmpol]
+                surface.zs[m,
+                                  n + self.ntor] = speczs[n + mntor,
+                                                        m + mmpol]
+                if not self.stellsym:
+                    surface.rs[m,
+                                      n + self.ntor] = specrs[n + mntor,
+                                                            m + mmpol]
+                    surface.zc[m,
+                                      n + self.ntor] = speczc[n + mntor,
+                                                            m + mmpol]
+        # Since we set rc array directly, we have to set the DOFS
+        surface.local_full_x = surface.get_dofs()
+        return surface
 
     @property
     def boundary(self):
