@@ -102,6 +102,11 @@ class Spec(Optimizable):
         if py_spec is None:
             raise RuntimeError(
                 "Using Spec requires py_spec to be installed.")
+        if tolerance <= 0:
+            raise ValueError(
+                'tolerance should be greater than zero'
+            )
+        self.tolerance = tolerance
 
         self.lib = spec
         # For the most commonly accessed fortran modules, provide a
@@ -135,14 +140,9 @@ class Spec(Optimizable):
                 filename = f"{filename}.sp"
             logger.info(f"Initializing a SPEC object from file: {filename}")
 
-        if tolerance <= 0:
-            raise ValueError(
-                'tolerance should be greater than zero'
-            )
-        self.tolerance = tolerance
 
         # Initialize the FORTRAN state with values in the input file:
-        self.init_fortran_state(filename)
+        self._init_fortran_state(filename)
         si = spec.inputlist  # Shorthand
 
         # Copy useful and commonly used values from SPEC inputlist to 
@@ -189,27 +189,28 @@ class Spec(Optimizable):
         self.files_to_delete = []
 
         # Create a surface object for the boundary:
-        boundary_arrays = {"specrc": si.rbc,
-                           "speczs": si.zbs}
-        if not self.stellsym: 
-            boundary_arrays.update({"specrs": si.rbs,
-                                    "speczc": si.zbc})
-        self._boundary = self._specarrays_to_surfRZFourier(**boundary_arrays)
+        self._boundary = SurfaceRZFourier(nfp=self.nfp, stellsym=self.stellsym,
+                                          mpol=self.mpol, ntor=self.ntor)
+        self._boundary.rc[:] = self.array_translator(si.rbc, style='spec').as_simsopt
+        self._boundary.zs[:] = self.array_translator(si.zbs, style='spec').as_simsopt 
+        if not self.freebound:
+            self._boundary.rs[:] = self.array_translator(si.rbs, style='spec').as_simsopt
+            self._boundary.zc[:] = self.array_translator(si.zbc, style='spec').as_simsopt
+        self._boundary.local_full_x = self._boundary.get_dofs()
+
         
         # If the equilibrium is freeboundary, we need to read the computational
         # boundary as well. Otherwise set the outermost boundary as the
         # computational boundary. 
         if self.freebound:
-            cboundary_arrays = {"specrc": si.rwc,
-                                "speczs": si.zws}
-            if not self.stellsym: 
-                cboundary_arrays.update({"specrs": si.rws,
-                                         "speczc": si.zwc})
-
-            self._computational_boundary = self._specarrays_to_surfRZFourier(**cboundary_arrays)
-            self._computational_boundary.fix_all()  # computational boundary is not moved!
-        else:  # in non-free-boundary case, computational boundary is the same as the plasma boundary
-            self._computational_boundary = self._boundary 
+            self._computational_boundary = SurfaceRZFourier(nfp=self.nfp, stellsym=self.stellsym,
+                                            mpol=self.mpol, ntor=self.ntor)
+            self._computational_boundary.rc[:] = self.array_translator(si.rwc, style='spec').as_simsopt
+            self._computational_boundary.zs[:] = self.array_translator(si.zws, style='spec').as_simsopt 
+            if not self.stellsym:
+                self._computational_boundary.rs[:] = self.array_translator(si.rws, style='spec').as_simsopt
+                self._computational_boundary.zc[:] = self.array_translator(si.zwc, style='spec').as_simsopt
+            self._computational_boundary.local_full_x = self._computational_boundary.get_dofs()
 
         self.need_to_run_code = True
         self.counter = -1
@@ -229,11 +230,11 @@ class Spec(Optimizable):
         # Define normal field - these are the Vns, Vnc harmonics. Can be used as
         # dofs in an optimization
         if self.freebound:
-            vns = self.create_SpecFourierArray(si.vns)
-            vnc = self.create_SpecFourierArray(si.vnc)
+            vns = self.array_translator(si.vns)
+            vnc = self.array_translator(si.vnc)
             self.normal_field = NormalField(nfp=self.nfp, stellsym=self.stellsym,
                                             mpol=self.mpol, ntor=self.ntor,
-                                            vns=vns.simsoptarray, vnc=vnc.simsoptarray, 
+                                            vns=vns.as_simsopt, vnc=vnc.as_simsopt, 
                                             computational_boundary=self._computational_boundary)
         else:
             self.normal_field: Optional[NormalField] = None
@@ -258,7 +259,8 @@ class Spec(Optimizable):
         """
         nmodes = self.allglobal.num_modes
         interfaces = []    # initialize list
-        for lvol in range(0, self.nvol-1):  # loop over volumes
+        n_guess_surfs = self.nvol if self.freebound else self.nvol -1 # if freeboundary, plasma boundary is also a guess surface
+        for lvol in range(0, n_guess_surfs):  # loop over volumes
             # the fourier comonents of the initial guess are stored in the allrzrz array
             thissurf_rc = self.allglobal.allrzrz[0, lvol, :nmodes]
             thissurf_zs = self.allglobal.allrzrz[1, lvol, :nmodes]
@@ -272,7 +274,7 @@ class Spec(Optimizable):
             for imode in range(0, nmodes):
                 mm = self.allglobal.mmrzrz[imode] # helper arrays to get index for each mode
                 nn = self.allglobal.nnrzrz[imode]
-                # The guess array could have more modes than we are running SPEC with, skip if case
+                # The guess surface could have more modes than we are running SPEC with, skip if case
                 if mm > self.mpol or abs(nn) > self.ntor:
                     continue
                 thissurf.set_rc(mm, nn, thissurf_rc[imode])
@@ -282,6 +284,57 @@ class Spec(Optimizable):
                     thissurf.set_zc(mm, nn, thissurf_zc[imode])
             interfaces.append(thissurf)
         return interfaces
+    
+    def _set_spec_initial_guess(self):
+        """
+        Set initial guesses in SPEC from a list of surfaceRZFourier objects.
+        """
+        # Set all modes to zero
+        spec.allglobal.mmrzrz[:] = 0
+        spec.allglobal.nnrzrz[:] = 0
+        spec.allglobal.allrzrz[:] = 0
+
+        # transform to SurfaceRZFourier if necessary
+        initial_guess = [s.to_RZFourier() for s in self.initial_guess]
+
+        # Loop on modes
+        imn = -1  # counter
+        for mm in range(0, self.mpol+1):
+            for nn in range(-self.ntor, self.ntor+1):
+                if mm == 0 and nn < 0:
+                    continue
+
+                imn += 1
+
+                spec.allglobal.mmrzrz[imn] = mm
+                spec.allglobal.nnrzrz[imn] = nn
+
+                # Populate inner plasma boundaries
+                for lvol in range(0, self.nvol-1):
+                    spec.allglobal.allrzrz[0, lvol, imn] = initial_guess[lvol].get_rc(mm, nn)
+                    spec.allglobal.allrzrz[1, lvol, imn] = initial_guess[lvol].get_zs(mm, nn)
+
+                    if not self.stellsym:
+                        spec.allglobal.allrzrz[2, lvol, imn] = initial_guess[lvol].get_rs(mm, nn)
+                        spec.allglobal.allrzrz[3, lvol, imn] = initial_guess[lvol].get_zc(mm, nn)
+    # possibly cleaner way to do this (tested to work Chris Smiet 11/9/2023):
+#            n_indices, m_values = np.indices([2*si.ntor+1, si.mpol+1]) #get indices for array
+#            n_values = n_indices - si.ntor # offset indices to correspond with mode numbers
+#            index_mask = ~np.logical_and(m_values==0, n_values < 0) # twiddle ~ NOT, pick elements
+#            numel = np.sum(index_mask) # number of trues in mask, i.e. chosen elements
+#            spec.allglobal.mmrzrz[:numel] = m_values[index_mask] # skip elements, make 1
+#            spec.allglobal.nnrzrz[:numel] = n_values[index_mask] # skip m==0 n<0 elements
+#            
+#            initial_guess = [s.to_RZFourier() for s in self.initial_guess]
+#            for lvol, surface in enumerate(initial_guess):
+#                # EXPLAIN: surface.rc is m,n indexed, transpose, apply above mask which unravels to 1d
+#                spec.allglobal.allrzrz[0, lvol, :numel] = surface.rc.transpose()[index_mask] 
+#                spec.allglobal.allrzrz[1, lvol, :numel] = surface.zs.transpose()[index_mask]
+#                if not self.stellsym:
+#                    spec.allglobal.allrzrz[2, lvol, :numel] = surface.rs.transpose()[index_mask]
+#                    spec.allglobal.allrzrz[3, lvol, :numel] = surface.zc.transpose()[index_mask]
+
+
         
     def _specarrays_to_surfRZFourier(self, specrc=None, speczs=None, specrs=None, speczc=None): 
         """
@@ -766,7 +819,7 @@ class Spec(Optimizable):
             if p is not None:
                 p.phiedge = x[0]
 
-    def init_fortran_state(self, filename: str):
+    def _init_fortran_state(self, filename: str):
         """
         Initialize SPEC fortran state from an input file.
 
@@ -822,26 +875,21 @@ class Spec(Optimizable):
         boundary_RZFourier = self.boundary.to_RZFourier()
 
         # Transfer boundary data to fortran:
-        si.rbc[:, :] = 0.0
-        si.zbs[:, :] = 0.0
+        si.rbc[:, :] = self.array_translator(boundary_RZFourier.rc, style='simsopt').as_spec
+        si.zbs[:, :] = self.array_translator(boundary_RZFourier.zs, style='simsopt').as_spec
         si.rbs[:, :] = 0.0
         si.zbc[:, :] = 0.0
-        mpol_capped = np.min([boundary_RZFourier.mpol, si.mmpol])
-        ntor_capped = np.min([boundary_RZFourier.ntor, si.mntor])
-        stellsym = bool(si.istellsym)
-        logger.debug(f"In run, si.istellsym = {si.istellsym} stellsym = {stellsym}")
-        for m in range(mpol_capped + 1):
-            for n in range(-ntor_capped, ntor_capped + 1):
-                si.rbc[n + si.mntor, m + si.mmpol] = boundary_RZFourier.get_rc(m, n)
-                si.zbs[n + si.mntor, m + si.mmpol] = boundary_RZFourier.get_zs(m, n)
-                if not stellsym:
-                    si.rbs[n + si.mntor, m + si.mmpol] = boundary_RZFourier.get_rs(m, n)
-                    si.zbc[n + si.mntor, m + si.mmpol] = boundary_RZFourier.get_zc(m, n)
+        if not self.stellsym:
+            si.rbs[:,:] = self.array_translator(boundary_RZFourier.rs, style='simsopt').as_spec
+            si.zbc[:,:] = self.array_translator(boundary_RZFourier.zc, style='simsopt').as_spec
 
         # transfer normal field to fortran:
         if self.freebound:
-            si.vns[:, :] = self.create_SpecFourierArray(self.normal_field.get_vns_asarray()).simsoptarray
-            si.vns[:, :] = self.create_SpecFourierArray(self.normal_field.get_vns_asarray()).simsoptarray
+            si.vns[:, :] = self.array_translator(self.normal_field.get_vns_asarray(), style='simsopt').as_spec
+            if not self.stellsym:
+                si.vnc[:, :] = self.array_translator(self.normal_field.get_vnc_asarray(), style='simsopt').as_spec
+            if self._computational_boundary is not self.normal_field.computational_boundary:
+                raise ValueError('Change of computational boundary not supported yet')
 
 
         # Set the coordinate axis using the lrzaxis=2 feature:
@@ -856,46 +904,19 @@ class Spec(Optimizable):
             si.zac[0:mn] = self.axis['zac']
 
         # Set initial guess
-        if not self.initial_guess is None:        
-            # Set all modes to zero
-            spec.allglobal.mmrzrz[:] = 0
-            spec.allglobal.nnrzrz[:] = 0
-            spec.allglobal.allrzrz[:] = 0
+        if self.initial_guess is not None:
+            self._set_spec_initial_guess()      
 
-            # transform to SurfaceRZFourier if necessary
-            initial_guess = [s.to_RZFourier() for s in self.initial_guess]
+            # write the boundary which is a guess in freeboundary
+            if self.freebound:
+                boundaryguess = self.initial_guess[-1].to_RZFourier()
+                si.rbc[:] = self.array_translator(boundaryguess.rc, style='simsopt').as_spec
+                si.zbs[:] = self.array_translator(boundaryguess.zs, style='simsopt').as_spec
+                if not self.stellsym:
+                    si.rbs[:] = self.array_translator(boundaryguess.rs, style='simsopt').as_spec
+                    si.zbc[:] = self.array_translator(boundaryguess.zc, style='simsopt').as_spec
 
-            # Loop on modes
-            imn = -1  # counter
-            for mm in range(0, si.mpol+1):
-                for nn in range(-si.ntor, si.ntor+1):
-                    if mm == 0 and nn < 0:
-                        continue
 
-                    imn += 1
-
-                    spec.allglobal.mmrzrz[imn] = mm
-                    spec.allglobal.nnrzrz[imn] = nn
-
-                    # Populate inner plasma boundaries
-                    for lvol in range(0, self.nvol-1):
-                        spec.allglobal.allrzrz[0, lvol, imn] = initial_guess[lvol].get_rc(mm, nn)
-                        spec.allglobal.allrzrz[1, lvol, imn] = initial_guess[lvol].get_zs(mm, nn)
-
-                        if not si.istellsym:
-                            spec.allglobal.allrzrz[2, lvol, imn] = initial_guess[lvol].get_rs(mm, nn)
-                            spec.allglobal.allrzrz[3, lvol, imn] = initial_guess[lvol].get_zc(mm, nn)
-
-                    # Populate plasma boundary
-                    if si.lfreebound:
-                        si.rbc[si.mntor+nn, si.mmpol+mm] = initial_guess[self.nvol-1].get_rc(mm, nn)
-                        si.zbs[si.mntor+nn, si.mmpol+mm] = initial_guess[self.nvol-1].get_zs(mm, nn)
-
-                        if not si.istellsym:
-                            si.rbs[si.mntor+nn, si.mmpol+mm] = initial_guess[self.nvol-1].get_rs(mm, nn)
-                            si.zbc[si.mntor+nn, si.mmpol+mm] = initial_guess[self.nvol-1].get_zc(mm, nn)
-
-            spec.allglobal.num_modes = imn + 1
 
         # Set profiles from dofs
         if self.pressure_profile is not None:
@@ -1060,7 +1081,7 @@ class Spec(Optimizable):
                 ]
 
                 for ii, (mm, nn) in enumerate(zip(self.results.output.im, self.results.output.in_)):
-                    nnorm = (nn / si.nfp).astype('int')
+                    nnorm = (nn / si.nfp).astype('int') # results.output.in_ is fourier number for 1 field period for reasons...
                     for lvol in range(0, self.mvol-1):
                         new_guess[lvol].set_rc(mm, nnorm, self.results.output.Rbc[lvol+1, ii])
                         new_guess[lvol].set_zs(mm, nnorm, self.results.output.Zbs[lvol+1, ii])
@@ -1111,17 +1132,35 @@ class Spec(Optimizable):
         self.run()
         return self.results.transform.fiota[1, 0]
     
-    def create_SpecFourierArray(self, array=None):
+    def array_translator(self, array=None, style='spec'):
         """
-        create a SpecFourierArray object to help transforming between
+        Returns a SpecFourierArray object to help transforming between
         arrays using SPEC conventions and simsopt conventions.
+
+        create from an array of either style by setting style='spec' or
+        style='simsopt' upon creation. 
         
         The created class will have properties:
-        - specarray: returns the SPEC array
-        - simsoptarray: returns the simsopt array
-        and setters to set the arrays from either convention.
+        - as_spec: returns the SPEC style array
+        - as_simsopt: returns the simsopt style array
+        and setters to set the arrays from either convention after creation.
+
+        SPEC arrays are zero-padded and indexed with Fortran conventions, 
+        in python that means the m=0,n=0 component is at [nmtor,mmpol].
+
+        use: 
+        vnc = myspec.array_translator(myspec.inputlist.rbc)
+        mysurf.rc = vnc.as_simsopt 
         """
-        return Spec.SpecFourierArray(self, array)
+        if style == 'spec':
+            return Spec.SpecFourierArray(self, array)
+        elif style == 'simsopt':
+            obj = Spec.SpecFourierArray(self)
+            obj.as_simsopt = array #setter function
+            return obj
+        else: 
+            raise ValueError(f'array style:{style} not supported, options: [simsopt, spec]')
+            
     
     # Inner class of Spec
     class SpecFourierArray: 
@@ -1136,7 +1175,7 @@ class Spec(Optimizable):
 
 
         """
-        def __init__(self, outer_spec, array): 
+        def __init__(self, outer_spec, array=None): 
             self._outer_spec = outer_spec
             self._mmpol = outer_spec.inputlist.mmpol
             self._mntor = outer_spec.inputlist.mntor
@@ -1145,17 +1184,17 @@ class Spec(Optimizable):
             self._array = np.array(array)
         
         @property
-        def specarray(self):
+        def as_spec(self):
             return self._array
         
-        @specarray.setter
-        def specarray(self, array):
+        @as_spec.setter
+        def as_spec(self, array):
             if array.shape != [2*self.mntor+1, 2*mmpol+1]:
                 raise ValueError('Array size is not consistent witn mmpol and mntor')
             self._array = array
 
         @property
-        def simsoptarray(self, ntor=None, mpol=None):
+        def as_simsopt(self, ntor=None, mpol=None):
             """
             get a simsopt style 'n,m' intexed non-padded array 
             from the SpecFourierArray.
@@ -1170,15 +1209,15 @@ class Spec(Optimizable):
             m_end = self._mmpol + mpol + 1
             return self._array[n_start:n_end, m_start:m_end].transpose()#switch n and m
         
-        @simsoptarray.setter
-        def simsoptarray(self, array, ntor=None, mpol=None):
+        @as_simsopt.setter
+        def as_simsopt(self, array, ntor=None, mpol=None):
             """
-            set the SpecFourierArray from a simsopt style 'n,m' intexed non-padded array
+            set the SpecFourierArray from a simsopt style 'm,n' intexed non-padded array
             """
-            if ntor is None:
-                ntor = int((array.shape[0]-1)/2)
             if mpol is None:
-                mpol = array.shape[1]-1
+                mpol = array.shape[0]-1
+            if ntor is None:
+                ntor = int((array.shape[1]-1)/2)
             n_start = self._mntor - ntor
             n_end = self._mntor + ntor + 1
             m_start = self._mmpol
