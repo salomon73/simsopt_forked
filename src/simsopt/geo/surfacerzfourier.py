@@ -236,7 +236,7 @@ class SurfaceRZFourier(sopp.SurfaceRZFourier, Surface):
         # recalculate the quadpoints if necessary (grid_range is not stored in the
         # surface object, so assume that if it is given, the gridpoints should be
         # recalculated to the specified size)
-        if ntheta is not otherntheta and nphi is not othernphi and grid_range is not None:
+        if ntheta is not otherntheta or nphi is not othernphi or grid_range is not None:
             kwargs["quadpoints_phi"], kwargs["quadpoints_theta"] = Surface.get_quadpoints(
                 ntheta=ntheta, nphi=nphi, nfp=other.nfp, range=grid_range)
         else:
