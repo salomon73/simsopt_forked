@@ -81,6 +81,8 @@ class NormalField(Optimizable):
     def from_spec(cls, filename):
         """
         Initialize using the harmonics in SPEC input file
+        WARNING: A normal field initialized with this method will 
+        not have a computational boundary
         """
 
         # Test if py_spec is available
@@ -110,7 +112,6 @@ class NormalField(Optimizable):
 
         return normal_field
 
-
     @classmethod
     def from_spec_object(cls, spec):
         """
@@ -119,7 +120,7 @@ class NormalField(Optimizable):
         if not spec.freebound:
             raise ValueError('The given SPEC object is not free-boundary')
         boundary_dict = {'specrc': spec.inputlist.rbc,
-                            'speczs': spec.inputlist.zbs}
+                         'speczs': spec.inputlist.zbs}
         if not spec.stellsym: 
             boundary_dict.append({'specrs': spec.inputlist.rbs,
                                   'speczc': spec.inputlist.zbc})

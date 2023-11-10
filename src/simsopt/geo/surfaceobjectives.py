@@ -791,6 +791,7 @@ class Iotas(Optimizable):
 
     def recompute_bell(self, parent=None):
         self._J = None
+        self._dJ = None
         self._dJ_by_dcoefficients = None
         self._dJ_by_dcoilcurrents = None
 
