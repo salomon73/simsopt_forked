@@ -313,6 +313,7 @@ class Spec(Optimizable):
                     if not self.stellsym:
                         spec.allglobal.allrzrz[2, lvol, imn] = initial_guess[lvol].get_rs(mm, nn)
                         spec.allglobal.allrzrz[3, lvol, imn] = initial_guess[lvol].get_zc(mm, nn)
+        spec.allglobal.num_modes = imn + 1
     # possibly cleaner way to do this (tested to work Chris Smiet 11/9/2023):
 #            n_indices, m_values = np.indices([2*si.ntor+1, si.mpol+1]) #get indices for array
 #            n_values = n_indices - si.ntor # offset indices to correspond with mode numbers
