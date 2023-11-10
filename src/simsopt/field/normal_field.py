@@ -54,7 +54,7 @@ class NormalField(Optimizable):
         if vns is None:
             vns = np.zeros((self.mpol + 1, 2 * self.ntor + 1))
 
-        if vnc is None and not stellsym:
+        if not self.stellsym and vnc is None:
             vnc = np.zeros((self.mpol + 1, 2 * self.ntor + 1))
         
         if computational_boundary is None:
@@ -66,32 +66,50 @@ class NormalField(Optimizable):
             self.ndof = self.ntor + self.mpol * (2 * self.ntor + 1)
         else:
             self.ndof = 2 * (self.ntor + self.mpol * (2 * self.ntor + 1)) + 1
-
-        # Pack in a single array
-        dofs = np.zeros((self.ndof,))
-
-        # Populate dofs array
-        vns_shape = vns.shape
-        input_mpol = int(vns_shape[0]-1)
-        input_ntor = int((vns_shape[1]-1)/2)
-        for mm in range(0, self.mpol+1):
-            for nn in range(-self.ntor, self.ntor+1):
-                if mm == 0 and nn < 0: continue
-                if mm > input_mpol: continue
-                if nn > input_ntor: continue
-
-                if not (mm == 0 and nn == 0):
-                    ii = self.get_index_in_dofs(mm, nn, even=False)
-                    dofs[ii] = vns[mm, input_ntor+nn]
-
-                if not self.stellsym:
-                    ii = self.get_index_in_dofs(mm, nn, even=True)
-                    dofs[ii] = vnc[mm, input_ntor+nn]
+        
+        self.vns = vns
+        self.vnc = vnc
+        
+        dofs = self.get_dofs()
 
         Optimizable.__init__(
             self,
             x0=dofs,
             names=self._make_names())
+
+    @classmethod
+    def from_spec(cls, filename):
+        """
+        Initialize using the harmonics in SPEC input file
+        """
+
+        # Test if py_spec is available
+        if py_spec is None:
+            raise RuntimeError(
+                "Initialization from Spec requires py_spec to be installed.")
+
+        # Read Namelist
+        nm = py_spec.SPECNamelist(filename)
+        ph = nm['physicslist']
+
+        # Read modes from SPEC input file
+        vns = np.asarray(ph['vns'])
+        if ph['istellsym']:
+            vnc = None
+        else:
+            vnc = np.asarray(ph['vnc'])
+
+        normal_field = cls(
+            nfp=ph['nfp'],
+            stellsym=bool(ph['istellsym']),
+            mpol=ph['Mpol'],
+            ntor=ph['Ntor'],
+            vns=vns,
+            vnc=vnc
+        )
+
+        return normal_field
+
 
     @classmethod
     def from_spec_object(cls, spec):
@@ -120,6 +138,32 @@ class NormalField(Optimizable):
         normal_field = cls(**input_dict)
 
         return normal_field
+    
+    def get_dofs(self):
+        """
+        get DOFs from vns and vnc
+        """
+        # Pack in a single array
+        dofs = np.zeros((self.ndof,))
+
+        # Populate dofs array
+        vns_shape = self.vns.shape
+        input_mpol = int(vns_shape[0]-1)
+        input_ntor = int((vns_shape[1]-1)/2)
+        for mm in range(0, self.mpol+1):
+            for nn in range(-self.ntor, self.ntor+1):
+                if mm == 0 and nn < 0: continue
+                if mm > input_mpol: continue
+                if nn > input_ntor: continue
+
+                if not (mm == 0 and nn == 0):
+                    ii = self.get_index_in_dofs(mm, nn, even=False)
+                    dofs[ii] = self.vns[mm, input_ntor+nn]
+
+                if not self.stellsym:
+                    ii = self.get_index_in_dofs(mm, nn, even=True)
+                    dofs[ii] = self.vnc[mm, input_ntor+nn]
+        return dofs
     
     def get_index_in_dofs(self, m, n, mpol=None, ntor=None, even=False):
         """
@@ -169,7 +213,9 @@ class NormalField(Optimizable):
     def set_vns(self, m, n, value):
         self.check_mn(m, n)
         ii = self.get_index_in_dofs(m, n)
-        self.local_full_x[ii] = value
+        tmp = self.local_full_x
+        tmp[ii] = value
+        self.local_full_x = tmp
 
     def get_vnc(self, m, n):
         self.check_mn(m, n)
@@ -185,7 +231,9 @@ class NormalField(Optimizable):
         if self.stellsym:
             raise ValueError('Stellarator symmetric has no vnc')
         else:
-            self.local_full_x[ii] = value
+            tmp = self.local_full_x
+            tmp[ii] = value
+            self.local_full_x = tmp
 
     def check_mn(self, m, n):
         if m < 0 or m > self.mpol:
