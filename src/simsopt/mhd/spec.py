@@ -679,6 +679,39 @@ class Spec(Optimizable):
                 self.append_parent(helicity_profile)
                 self.need_to_run_code = True
 
+    def activate_profile(self, longname):
+        """
+        Take a profile from the inputlist, and make it optimizable in 
+        simsopt.
+        Args:
+            longname: string, either 
+                - 'pressure'
+                - 'volume_current'
+                - 'surface_current'
+                - 'iota'
+                - 'oita'
+                - 'mu'
+                - 'pflux'
+                - 'tflux'
+                - 'helicity'
+        """
+        profile_dict = {
+            'pressure': {'specname': 'pressure', 'cumulative': False, 'length': self.nvol},
+            'volume_current': {'specname': 'ivolume', 'cumulative': True, 'length': self.nvol},
+            'interface_current': {'specname': 'isurf', 'cumulative': False, 'length': self.nvol-1},
+            'helicity': {'specname': 'helicity', 'cumulative': False, 'length': self.mvol},
+            'iota': {'specname': 'iota', 'cumulative': False, 'length': self.mvol},
+            'oita': {'specname': 'oita', 'cumulative': False, 'length': self.mvol},
+            'mu': {'specname': 'mu', 'cumulative': False, 'length': self.mvol},
+            'pflux': {'specname': 'pflux', 'cumulative': True, 'length': self.mvol},
+            'tflux': {'specname': 'tflux', 'cumulative': True, 'length': self.mvol}
+        }
+
+        profile_data = self.inputlist.__getattribute__(profile_dict[longname]['specname'])[0:profile_dict[longname]['length']]
+        profile = ProfileSpec(profile_data, cumulative=profile_dict[longname]['cumulative'], psi_edge=self.inputlist.phiedge)
+        profile.unfix_all()
+        self.__setattr__(longname + '_profile', profile)
+
     def set_profile(self, longname, lvol, value):
         """
         This function is used to set the pressure, currents, iota, oita,
@@ -776,7 +809,7 @@ class Spec(Optimizable):
         ]
         for p in profiles:
             if p is not None:
-                p.phiedge = x[0]
+                p.psi_edge = x[0]
 
     def _init_fortran_state(self, filename: str):
         """
