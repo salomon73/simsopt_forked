@@ -329,18 +329,59 @@ def coils_to_focus(filename, curves, currents, nfp=1, stellsym=False, Ifree=Fals
 
 class CoilSet(Optimizable):
     """
-    A set of coils as a single optimizable object. 
+    A set of coils as a single optimizable object, and a surface on which 
+    it evaluates the field.
+
+    The surfaces' range will be adapted to 'half period' or 'field period'
+    if the surface is stellarator symmetric or not.
+
+    Optimization target functions are all available from this class: 
+    flux_penalty, length_penalty, cc_distance_penalty, cs_distance_penalty,
+    lp_curvature_penalty, meansquared_curvature_penalty, arc_length_variation_penalty
+    and total_length.
+
+    These functions can then be used to define a FOCUS-like optimization problem
+    (note that the FOCUS algorithm is not a least-squares algorithm) that can be passed
+    to scipy.minimize, or the CoilSet can be used as a parent for a SPEC NormalField
+    object. 
     """
     #from simsopt.geo import Surface
 
-    def __init__(self, base_coils, all_coils, surface=None):  
-        from simsopt.field import BiotSavart 
-        self.coils = all_coils
-        self.base_coils = base_coils
+    def __init__(self, base_coils=None, all_coils=None, surface=None):  
+        from simsopt.field import BiotSavart
+
+        #set the surface, change its's range if necessary
+        if surface is None:
+            from simsopt.geo import SurfaceRZFourier
+            self._surface = SurfaceRZFourier()
+        #stellarator symmetric surfaces are more efficiently evaluated on a half-period
+        else:
+            if surface.stellsym:
+                if surface.deduced_range is not surface.RANGE_HALF_PERIOD:
+                    newsurf = surface.toRZFourier().from_other_surface(surface.toRZFourier(), range=surface.RANGE_HALF_PERIOD)
+                    self._surface = newsurf
+            else:
+                if surface.deduced_range is not surface.RANGE_FIELD_PERIOD:
+                    newsurf = surface.toRZFourier().from_other_surface(surface.toRZFourier(), range=surface.RANGE_FIELD_PERIOD)
+                    self._surface = newsurf
+        # set the coils
+        if base_coils is not None:
+            self.base_coils = base_coils
+            if all_coils is None:
+                all_coils = coils_via_symmetries(base_coils, [coil.current for coil in base_coils], nfp=self._surface.nfp, stellsym=self._surface.stellsym)
+            else: 
+                self.coils = all_coils
+        else:
+            if all_coils is not None:
+                raise ValueError("If base_coils is None, all_coils must be None as well")
+            base_curves = self._cicrclecoils_around_surface(self._surface, nfp=self._surface.nfp, coils_per_period=10)
+            base_currents = [Current(1e5) for _ in base_curves]
+            base_coils = [Coil(curv, curr) for (curv, curr) in zip(base_curves, base_currents)]
+            self.base_coils = base_coils
+            self.coils = coils_via_symmetries(base_coils, [coil.current for coil in base_coils], nfp=self._surface.nfp, stellsym=self._surface.stellsym)
+        
         self.bs = BiotSavart(all_coils)
-        self.surface = surface
-        if surface is not None:
-            self.bs.set_points(surface.gamma().reshape((-1, 3)))
+        self.bs.set_points(self._surface.gamma().reshape((-1, 3)))
         super().__init__(depends_on=base_coils)
 
     @classmethod
@@ -382,7 +423,7 @@ class CoilSet(Optimizable):
         return cls(base_coils, all_coils, surf)
     
     @classmethod
-    def for_spec_equil(cls, spec, coils_per_period=5, nfp=None, current_constraint="fix_all", **kwargs):
+    def for_spec_equil(cls, spec, coils_per_period=5, current_constraint="fix_all", **kwargs):
         """
         Create a CoilSet for a given SPEC equilibrium. The coils are created using
         :obj:`create_equally_spaced_curves` with the given parameters.
@@ -402,8 +443,7 @@ class CoilSet(Optimizable):
                     the first sine/cosine coefficient (factor > 1)
             use_stellsym: Whether to use stellarator symmetry
         """
-        if nfp is None:
-            nfp = spec.nfp
+        nfp = spec.nfp
         use_stellsym = spec.stellsym
         total_current = spec.inputlist.curtor
         total_coil_number = coils_per_period * nfp * (1 + int(use_stellsym)) #only coils for half-period
@@ -425,6 +465,27 @@ class CoilSet(Optimizable):
         all_coils = coils_via_symmetries(base_curves, base_currents, nfp, stellsym=True)
         return cls(base_coils, all_coils, surface)
     
+    @property
+    def surface(self):
+        return self._surface
+    
+    @surface.setter
+    def surface(self, surface: 'Surface'):
+        """
+        set a new surface for the CoilSet. Change its range if necessary.
+        """
+        if surface.stellsym: 
+            if surface.deduced_range is not surface.RANGE_HALF_PERIOD:
+                newsurf = surface.toRZFourier().from_other_surface(surface.toRZFourier(), range=surface.RANGE_HALF_PERIOD)
+                surface = newsurf
+        else:
+            if surface.deduced_range is not surface.RANGE_FIELD_PERIOD:
+                newsurf = surface.toRZFourier().from_other_surface(surface.toRZFourier(), range=surface.RANGE_FIELD_PERIOD)
+                surface = newsurf
+        self.bs.set_points(surface.gamma().reshape((-1, 3)))
+        self._surface = surface
+
+    
     def _cicrclecoils_around_surface(surf, nfp=None, coils_per_period=4, order=6, R0=None, R1=None, use_stellsym=None, factor=2.):
         """
         return a set of base curves for a surface using the surfaces properties where possible
@@ -442,15 +503,14 @@ class CoilSet(Optimizable):
             # take the magnitude of the first-order poloidal Fourier coefficient
             R1 = np.sqrt(surf.to_RZFourier().get_rc(1, 0)**2 + surf.to_RZFourier().get_zs(1, 0)**2) * factor
         return create_equally_spaced_curves(coils_per_period, nfp, stellsym=use_stellsym, R0=R0, R1=R1, order=order)
-
-    @property
-    def flux_penalty(self):
+    
+    def flux_penalty(self, target=None):
         """
         Return the penalty function for the quadratic flux penalty on 
         the surface
         """
         from simsopt.objectives import SquaredFlux
-        return SquaredFlux(self.surface, self.bs)
+        return SquaredFlux(self.surface, self.bs, target=target)
     
     def length_penalty(self, TOTAL_LENGTH):
         """
@@ -500,7 +560,6 @@ class CoilSet(Optimizable):
         base_curves = [coil.curve for coil in self.base_coils]
         return sum(LpCurveCurvature(curve, p, CURVATURE_THRESHOLD) for curve in base_curves)
     
-    @property
     def meansquared_curvature_penalty(self):
         """
         Return a penalty function on the mean squared curvature of the coils
@@ -517,7 +576,6 @@ class CoilSet(Optimizable):
         meansquaredcurvatures = [MeanSquaredCurvature(coil.curve) for coil in self.base_coils]
         return sum(QuadraticPenalty(msc, CURVATURE_THRESHOLD, "max") for msc in meansquaredcurvatures)
     
-    @property 
     def arc_length_variation_penalty(self):
         """
         Return a penalty function on the arc length variation of the coils
@@ -525,7 +583,6 @@ class CoilSet(Optimizable):
         from simsopt.geo import ArclengthVariation
         return sum(ArclengthVariation(coil.curve) for coil in self.base_coils)
     
-    @property
     def total_length(self):
         """
         Return the total length of the coils
