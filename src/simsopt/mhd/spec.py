@@ -11,6 +11,7 @@ import logging
 import os.path
 import traceback
 from typing import Optional
+from scipy.constants import mu_0
 
 import numpy as np
 
@@ -810,6 +811,9 @@ class Spec(Optimizable):
         for p in profiles:
             if p is not None:
                 p.psi_edge = x[0]
+    @property 
+    def toroidal_current_amperes(self):
+        return self.inputlist.curtor/(2*np.pi*mu_0)
 
     def _init_fortran_state(self, filename: str):
         """
