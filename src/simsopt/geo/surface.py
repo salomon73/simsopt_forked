@@ -690,7 +690,7 @@ class Surface(Optimizable):
             + A^{mn}_c \cos(m\theta - n*Nfp*\phi)`
         Where the cosine series is only evaluated if the surface is not stellarator
         symmetric (if the field does not adhere to the symmetry of the surface, 
-        reques the cosine series by setting the kwarg stellsym=False) 
+        request the cosine series by setting the kwarg stellsym=False)
         *Arguments*:
             - field: 2D array of shape (numquadpoints_phi, numquadpoints_theta).
             - mpol: maximum poloidal mode number of the transform, if None,
@@ -804,6 +804,22 @@ class Surface(Optimizable):
                 raise ValueError("normalization must be a float")
             field = field * normalization
         return field
+    
+    @property
+    def deduced_range(self):
+        """
+        The quadpoints of a surface can be anything, but are often set to 
+        'full torus', 'field period' or 'half period'. 
+        Since this is not stored in the object, but often useful to know
+        this function deduces the range from the quadpoints
+        """
+        if np.isclose(self.quadpoints_phi[-1], 1-1/len(self.quadpoints_phi), atol=1e-10):
+            return Surface.RANGE_FULL_TORUS
+        elif self.quadponts_phi[0] == 0:
+            return  Surface.RANGE_FIELD_PERIOD
+        else:
+            return Surface.RANGE_HALF_PERIOD
+        
 
 
 def signed_distance_from_surface(xyz, surface):
