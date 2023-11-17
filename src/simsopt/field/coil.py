@@ -358,11 +358,11 @@ class CoilSet(Optimizable):
         else:
             if surface.stellsym:
                 if surface.deduced_range is not surface.RANGE_HALF_PERIOD:
-                    newsurf = surface.toRZFourier().from_other_surface(surface.toRZFourier(), range=surface.RANGE_HALF_PERIOD)
+                    newsurf = surface.to_RZFourier().from_other_surface(surface.to_RZFourier(), range=surface.RANGE_HALF_PERIOD)
                     self._surface = newsurf
             else:
                 if surface.deduced_range is not surface.RANGE_FIELD_PERIOD:
-                    newsurf = surface.toRZFourier().from_other_surface(surface.toRZFourier(), range=surface.RANGE_FIELD_PERIOD)
+                    newsurf = surface.to_RZFourier().from_other_surface(surface.to_RZFourier(), range=surface.RANGE_FIELD_PERIOD)
                     self._surface = newsurf
         # set the coils
         if base_coils is not None:
@@ -443,9 +443,10 @@ class CoilSet(Optimizable):
                     the first sine/cosine coefficient (factor > 1)
             use_stellsym: Whether to use stellarator symmetry
         """
+        from scipy.constants import mu_0
         nfp = spec.nfp
         use_stellsym = spec.stellsym
-        total_current = spec.inputlist.curtor
+        total_current = spec.toroidal_current_amperes
         total_coil_number = coils_per_period * nfp * (1 + int(use_stellsym)) #only coils for half-period
         if spec.freebound: 
             surface = spec.computational_boundary
@@ -476,11 +477,11 @@ class CoilSet(Optimizable):
         """
         if surface.stellsym: 
             if surface.deduced_range is not surface.RANGE_HALF_PERIOD:
-                newsurf = surface.toRZFourier().from_other_surface(surface.toRZFourier(), range=surface.RANGE_HALF_PERIOD)
+                newsurf = surface.to_RZFourier().from_other_surface(surface.to_RZFourier(), range=surface.RANGE_HALF_PERIOD)
                 surface = newsurf
         else:
             if surface.deduced_range is not surface.RANGE_FIELD_PERIOD:
-                newsurf = surface.toRZFourier().from_other_surface(surface.toRZFourier(), range=surface.RANGE_FIELD_PERIOD)
+                newsurf = surface.to_RZFourier().from_other_surface(surface.to_RZFourier(), range=surface.RANGE_FIELD_PERIOD)
                 surface = newsurf
         self.bs.set_points(surface.gamma().reshape((-1, 3)))
         self._surface = surface
@@ -612,6 +613,8 @@ class CoilSet(Optimizable):
         underlying Curve. All arguments are passed to
         :obj:`simsopt.geo.Curve/Surface.plot()`
         """
-        from simsopt.geo.plotting import plot
+        from simsopt.geo import plot, SurfaceRZFourier
+        #plot the coils, which are already a list:
         plot(self.coils, **kwargs, show=False)
-        self.surface.plot(**kwargs, show=True)
+        #generate a full torus for plotting, plot it:
+        SurfaceRZFourier.from_other_surface(self.surface.to_RZFourier(), range=SurfaceRZFourier.RANGE_FULL_TORUS).plot(**kwargs, show=True)

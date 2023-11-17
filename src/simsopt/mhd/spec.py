@@ -249,6 +249,20 @@ class Spec(Optimizable):
         super().__init__(x0=x0, fixed=fixed, names=names,
                          depends_on=depends_on,
                          external_dof_setter=Spec.set_dofs)
+        
+    @classmethod
+    def default_freeboundary(cls):
+        """
+        Create a default freeboundary SPEC object
+        """
+        return cls(filename=os.path.join(os.path.dirname(__file__), 'defaults_freebound.sp'))
+    
+    @classmethod
+    def default_fixedboundary(cls):
+        """
+        Create a default fixedboundary SPEC object (same as calling class empty)
+        """
+        return cls()
 
     def _read_initial_guess(self):
         """
@@ -811,6 +825,7 @@ class Spec(Optimizable):
         for p in profiles:
             if p is not None:
                 p.psi_edge = x[0]
+
     @property 
     def toroidal_current_amperes(self):
         return self.inputlist.curtor/(2*np.pi*mu_0)
