@@ -43,7 +43,7 @@ except ImportError as e:
 
 from .._core.optimizable import Optimizable
 from .._core.util import ObjectiveFailure
-from ..field.normal_field import NormalField
+from ..field.normal_field import NormalField, CoilNormalField
 from ..geo.surfacerzfourier import SurfaceRZFourier
 from .profiles import ProfileSpec
 
@@ -229,12 +229,12 @@ class Spec(Optimizable):
         if self.freebound:
             vns = self.array_translator(si.vns)
             vnc = self.array_translator(si.vnc)
-            self.normal_field = NormalField(nfp=self.nfp, stellsym=self.stellsym,
-                                            mpol=self.mpol, ntor=self.ntor,
-                                            vns=vns.as_simsopt, vnc=vnc.as_simsopt, 
-                                            computational_boundary=self._computational_boundary)
+            self._normal_field = NormalField(nfp=self.nfp, stellsym=self.stellsym,
+                                             mpol=self.mpol, ntor=self.ntor,
+                                             vns=vns.as_simsopt, vnc=vnc.as_simsopt, 
+                                             computational_boundary=self._computational_boundary)
         else:
-            self.normal_field: Optional[NormalField] = None
+            self._normal_field: Optional[NormalField] = None
 
         # By default, all dofs owned by SPEC directly, as opposed to
         # dofs owned by the boundary surface object, are fixed.
@@ -242,7 +242,7 @@ class Spec(Optimizable):
         fixed = np.full(len(x0), True)
         names = ['phiedge', 'curtor']
         if self.freebound:
-            depends_on = [self.normal_field]
+            depends_on = [self._normal_field]
         else:
             depends_on = [self._boundary]
 
@@ -355,6 +355,43 @@ class Spec(Optimizable):
             SurfaceRZFourier instance representing the plasma boundary
         """
         return self._boundary
+
+    @boundary.setter
+    def boundary(self, boundary):
+        """
+        Setter for the geometry of the plasma boundary
+        """
+        if not self.freebound: 
+            if self._boundary is not boundary:
+                self.remove_parent(self._boundary)
+                self._boundary = boundary
+                self.append_parent(boundary)
+                return
+        else: #in freeboundary case, plasma boundary is is not a parent
+            self._boundary = boundary
+    
+    @property
+    def normal_field(self):
+        """
+        Getter for the normal field
+        """
+        return self._normal_field
+    
+    @normal_field.setter
+    def normal_field(self, normal_field):
+        """
+        Setter for the normal field
+        """
+        if not self.freebound:
+            raise ValueError('Normal field can only be set in freeboundary case')
+        if not isinstance(normal_field, NormalField) or not isinstance(normal_field, CoilNormalField):
+            raise ValueError('Input should be a NormalField or CoilNormalField')
+        if self._normal_field is not normal_field:
+            self.remove_parent(self._normal_field)
+            self._normal_field = normal_field
+            self.append_parent(normal_field)
+            return
+
 
     @property
     def computational_boundary(self):
@@ -788,17 +825,6 @@ class Spec(Optimizable):
 
         return profile.f(lvol)
 
-    @boundary.setter
-    def boundary(self, boundary):
-        """
-        Setter for the geometry of the plasma boundary
-        """
-
-        if self._boundary is not boundary:
-            self.remove_parent(self._boundary)
-            self._boundary = boundary
-            self.append_parent(boundary)
-
     def recompute_bell(self, parent=None):
         self.need_to_run_code = True
 
@@ -827,8 +853,13 @@ class Spec(Optimizable):
                 p.psi_edge = x[0]
 
     @property 
-    def toroidal_current_amperes(self):
-        return self.inputlist.curtor/(2*np.pi*mu_0)
+    def poloidal_current_amperes(self):
+        """
+        return the total poloidal current in Amperes,
+        i.e. the current that must be carried by the coils that link the plasma 
+        poloidally
+        """
+        return self.inputlist.curpol/(mu_0)
 
     def _init_fortran_state(self, filename: str):
         """
@@ -897,8 +928,6 @@ class Spec(Optimizable):
             si.vns[:, :] = self.array_translator(self.normal_field.get_vns_asarray(), style='simsopt').as_spec
             if not self.stellsym:
                 si.vnc[:, :] = self.array_translator(self.normal_field.get_vnc_asarray(), style='simsopt').as_spec
-            if self._computational_boundary is not self.normal_field.computational_boundary:
-                raise ValueError('Change of computational boundary not supported yet')
 
         # Set the coordinate axis using the lrzaxis=2 feature:
         si.lrzaxis = 2
@@ -912,8 +941,8 @@ class Spec(Optimizable):
             si.zac[0:mn] = self.axis['zac']
 
         # Set initial guess
-        if self.initial_guess is not None:
-            self._set_spec_initial_guess()       
+        if self.initial_guess is not None: # note: self.initial_guess is None for workers!! only leaders read and do_stuff with initial_guess
+            self._set_spec_initial_guess() # workers get the info through a broadcast. this line fails if workers get a guess set
 
             # write the boundary which is a guess in freeboundary
             if self.freebound:
@@ -1021,6 +1050,7 @@ class Spec(Optimizable):
                 logger.debug('About to call check_inputs')
                 spec.allglobal.check_inputs()
             logger.debug('About to call broadcast_inputs')
+            self.mpi.comm_groups.Barrier() # wait for 
             spec.allglobal.broadcast_inputs()
             logger.debug('About to call preset')
             spec.preset()
@@ -1101,8 +1131,9 @@ class Spec(Optimizable):
                 axis['zas'] = self.results.output.Zbs[0, 0:si.ntor+1]
                 self.axis = copy.copy(axis)
 
-            # Enforce SPEC to use initial guess
-            self.initial_guess = new_guess
+            # Enforce SPEC to use initial guess, but only group leaders have the necessary arrays
+            if self.mpi.proc0_groups:
+                self.initial_guess = new_guess  #set this here? or make whole above monster proc0-exclusive
             self.inputlist.linitialize = 0
 
         # Group leaders handle deletion of files:
@@ -1137,6 +1168,23 @@ class Spec(Optimizable):
         """
         self.run()
         return self.results.transform.fiota[1, 0]
+    
+    def replace_normal_field_with_coils(self, filename=None, TARGET_LENGTH=3000):
+        """
+        replace the daddy normal_field with a CoilNormalField instance that
+        inherits its' degrees of freedom from a CoilSet. 
+        
+        A filename can be given in which the coils are specified (standard
+        JSON format used by calling Optimizable.to_json() on a CoilSet instance)
+        [NOT IMPLEMENTED YET]
+        """
+        if filename is not None:
+            raise NotImplementedError('filename not supported yet')
+        
+        coil_normal_field = CoilNormalField.from_spec_object(self, optimize_coils=True, TARGET_LENGTH=TARGET_LENGTH)
+        self.normal_field = coil_normal_field
+        
+
     
     def array_translator(self, array=None, style='spec'):
         """
