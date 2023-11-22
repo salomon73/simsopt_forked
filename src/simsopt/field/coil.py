@@ -347,40 +347,46 @@ class CoilSet(Optimizable):
     """
     #from simsopt.geo import Surface
 
-    def __init__(self, base_coils=None, all_coils=None, surface=None):  
+    def __init__(self, base_coils=None, coils=None, surface=None):  
         from simsopt.field import BiotSavart
 
         #set the surface, change its's range if necessary
         if surface is None:
             from simsopt.geo import SurfaceRZFourier
-            self._surface = SurfaceRZFourier()
+            standardsurface = SurfaceRZFourier()
+            self._surface = SurfaceRZFourier.from_other_surface(standardsurface, range=SurfaceRZFourier.RANGE_HALF_PERIOD)
         #stellarator symmetric surfaces are more efficiently evaluated on a half-period
         else:
             if surface.stellsym:
-                if surface.deduced_range is not surface.RANGE_HALF_PERIOD:
+                if surface.deduced_range is surface.RANGE_HALF_PERIOD:
+                    self._surface = surface
+                else:
                     newsurf = surface.to_RZFourier().from_other_surface(surface.to_RZFourier(), range=surface.RANGE_HALF_PERIOD)
                     self._surface = newsurf
             else:
-                if surface.deduced_range is not surface.RANGE_FIELD_PERIOD:
+                if surface.deduced_range is surface.RANGE_FIELD_PERIOD:
+                    self._surface = surface
+                else: 
                     newsurf = surface.to_RZFourier().from_other_surface(surface.to_RZFourier(), range=surface.RANGE_FIELD_PERIOD)
                     self._surface = newsurf
+
         # set the coils
         if base_coils is not None:
             self.base_coils = base_coils
-            if all_coils is None:
-                all_coils = coils_via_symmetries(base_coils, [coil.current for coil in base_coils], nfp=self._surface.nfp, stellsym=self._surface.stellsym)
+            if coils is None:
+                coils = coils_via_symmetries([coil.curve for coil in base_coils], [coil.current for coil in base_coils], nfp=self._surface.nfp, stellsym=self._surface.stellsym)
             else: 
-                self.coils = all_coils
+                self.coils = coils
         else:
-            if all_coils is not None:
-                raise ValueError("If base_coils is None, all_coils must be None as well")
+            if coils is not None:
+                raise ValueError("If base_coils is None, coils must be None as well")
             base_curves = self._cicrclecoils_around_surface(self._surface, nfp=self._surface.nfp, coils_per_period=10)
             base_currents = [Current(1e5) for _ in base_curves]
             base_coils = [Coil(curv, curr) for (curv, curr) in zip(base_curves, base_currents)]
             self.base_coils = base_coils
-            self.coils = coils_via_symmetries(base_coils, [coil.current for coil in base_coils], nfp=self._surface.nfp, stellsym=self._surface.stellsym)
+            self.coils = coils_via_symmetries([coil.curve for coil in base_coils], [coil.current for coil in base_coils], nfp=self._surface.nfp, stellsym=self._surface.stellsym)
         
-        self.bs = BiotSavart(all_coils)
+        self.bs = BiotSavart(self.coils)
         self.bs.set_points(self._surface.gamma().reshape((-1, 3)))
         super().__init__(depends_on=base_coils)
 
@@ -419,8 +425,17 @@ class CoilSet(Optimizable):
         else: 
             raise ValueError("current_constraint must be 'fix_one', 'fix_all' or 'free_all'")
         base_coils = [Coil(curv, curr) for (curv, curr) in zip(base_curves, base_currents)]
-        all_coils = coils_via_symmetries(base_curves, base_currents, nfp, stellsym=True)
-        return cls(base_coils, all_coils, surf)
+        coils = coils_via_symmetries(base_curves, base_currents, nfp, stellsym=True)
+        return cls(base_coils, coils, surf)
+    
+    @classmethod
+    def from_mgrid_file(cls, makegrid_file, surface):
+        """
+        Create a CoilSet from a MAKEGRID file and a surface.
+        """
+        coils = load_coils_from_makegrid_file(makegrid_file, order=6, ppp=20)
+        return cls(base_coils=coils, coils=coils, surface=surface)
+
     
     @classmethod
     def for_spec_equil(cls, spec, coils_per_period=5, current_constraint="fix_all", **kwargs):
@@ -446,7 +461,7 @@ class CoilSet(Optimizable):
         from scipy.constants import mu_0
         nfp = spec.nfp
         use_stellsym = spec.stellsym
-        total_current = spec.toroidal_current_amperes
+        total_current = spec.poloidal_current_amperes
         total_coil_number = coils_per_period * nfp * (1 + int(use_stellsym)) #only coils for half-period
         if spec.freebound: 
             surface = spec.computational_boundary
@@ -463,8 +478,8 @@ class CoilSet(Optimizable):
         else:
             raise ValueError("current_constraint must be 'fix_one', 'fix_all' or 'free_all'")
         base_coils = [Coil(curv, curr) for (curv, curr) in zip(base_curves, base_currents)]
-        all_coils = coils_via_symmetries(base_curves, base_currents, nfp, stellsym=True)
-        return cls(base_coils, all_coils, surface)
+        coils = coils_via_symmetries(base_curves, base_currents, nfp, stellsym=True)
+        return cls(base_coils, coils, surface)
     
     @property
     def surface(self):
@@ -475,6 +490,7 @@ class CoilSet(Optimizable):
         """
         set a new surface for the CoilSet. Change its range if necessary.
         """
+        # Changing surface requires changing the BiotSavart object. We also modify its range
         if surface.stellsym: 
             if surface.deduced_range is not surface.RANGE_HALF_PERIOD:
                 newsurf = surface.to_RZFourier().from_other_surface(surface.to_RZFourier(), range=surface.RANGE_HALF_PERIOD)
@@ -485,8 +501,8 @@ class CoilSet(Optimizable):
                 surface = newsurf
         self.bs.set_points(surface.gamma().reshape((-1, 3)))
         self._surface = surface
-
     
+    @staticmethod
     def _cicrclecoils_around_surface(surf, nfp=None, coils_per_period=4, order=6, R0=None, R1=None, use_stellsym=None, factor=2.):
         """
         return a set of base curves for a surface using the surfaces properties where possible
@@ -520,11 +536,12 @@ class CoilSet(Optimizable):
         Args:
             TOTAL_LENGTH: The threshold length above which the penalty is applied
         """
-        from simsopt.objectives import CurveLength, QuadraticPenalty
+        from simsopt.objectives import QuadraticPenalty
+        from simsopt.geo import CurveLength
         # only calculate length of base_coils, others are equal
         coil_multiplication_factor = len(self.coils) / len(self.base_coils)
         # summing optimizables makes new optimizables
-        lenth_optimizable = sum(CurveLength(coil) for coil in self.base_coils)*coil_multiplication_factor
+        lenth_optimizable = sum(CurveLength(coil.curve) for coil in self.base_coils)*coil_multiplication_factor
         # return the penalty function
         return QuadraticPenalty(lenth_optimizable, TOTAL_LENGTH, "max")
     
