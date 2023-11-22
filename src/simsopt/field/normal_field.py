@@ -486,36 +486,28 @@ class CoilNormalField(NormalField):
     from its CoilSet parent. 
 
     Args:
-        coilset: The CoilSet object from which to inherit the degrees of freedom
-        computational_boundary: The computational boundary of the NormalField. 
-            If None, the computational boundary of the CoilSet will be used.
+        coilset: The CoilSet object from which to inherit the degrees of freedom        
 
     Properties:
+        computational_boundary: The computational boundary of the SPEC simulation, 
+        that is managed by the CoilSet. 
         vns/vnc: fourier harmonics of the normal field. 
         This property is cached, and recomputed only when the parents' DOFS (the
         coils) change.
     """
-    def __init__(self, coilset: 'CoilSet'=None, computational_boundary:'SurfaceRZFourier'=None):
+    def __init__(self, coilset: 'CoilSet'=None):
         self._vns = None
         self._vnc = None
 
         # Set coilset and boundary: if not given create standard ones. 
         if coilset is not None:
             self.coilset = coilset
-            if computational_boundary is not None:
-                self.computational_boundary = computational_boundary
-            else: 
-                self.computational_boundary = self.coilset.surface
+            self.computational_boundary = coilset.surface
         else:  
             from simsopt.field import CoilSet
-            # if no computational boundary is given, create a standard one
-            if computational_boundary is None:
-                self.computational_boundary = SurfaceRZFourier()
-                self.coilset = CoilSet.for_surface(self.computational_boundary)
-            else:
-                self.computational_boundary = computational_boundary
-                # create a coilset for the given computational boundary
-                self.coilset = CoilSet.for_surface(self.computational_boundary)
+            surface = SurfaceRZFourier()
+            self.coilset = CoilSet.for_surface(surface)
+            self.computational_boundary = self.coilset.surface
 
         self.nfp = self.computational_boundary.nfp
         self.stellsym = self.computational_boundary.stellsym
@@ -524,18 +516,26 @@ class CoilNormalField(NormalField):
         Optimizable.__init__(self, depends_on=[self.coilset])  # call the Optimizable constructor, skip the NormalField constructor
 
     @classmethod
-    def from_spec_object(cls, spec, coils_per_period = 6):
+    def from_spec_object(cls, spec, coils_per_period=6, optimize_coils=False, TARGET_LENGTH=1000):
+        """
+        Initialize a CoilNormalField using the simsopt SPEC object's attributes
+        """
         from simsopt.field import CoilSet
-        """
-        Initialize using the simsopt SPEC object's attributes
-        """
         if not spec.freebound:
             raise ValueError('The given SPEC object is not free-boundary')
         computational_boundary = spec.computational_boundary
-        coilset = CoilSet.for_spec_equil(spec, coils_per_period=coils_per_period)
+        coilset = CoilSet.for_spec_equil(spec, coils_per_period=coils_per_period, current_constraint='fix_all')
+        coil_normal_field = cls(coilset=coilset)
+        if not optimize_coils:
+            print("Good luck with these coils! They are not optimized.")
+            print("To optimize the coils, call coil_normal_field.optimize_coils()")
+            print("rms difference between target and actual normal field: ")
+            print(np.sum(np.sqrt(coil_normal_field.vns**2 - spec.normal_field.get_vns_asarray()**2)))
+            return coil_normal_field
+        else: 
+            coil_normal_field.optimize_coils(spec.normal_field.get_vns_asarray(), spec.normal_field.get_vnc_asarray(), TARGET_LENGTH=TARGET_LENGTH)
 
-
-
+        return coil_normal_field
     
     @classmethod
     def from_saved_coilset(cls, coilset_filename, computational_boundary):
@@ -547,16 +547,14 @@ class CoilNormalField(NormalField):
                 simulation.
         """
         from simsopt.field import CoilSet
-        coilset = CoilSet.from_saved_coilset(coilset_filename)
-        return cls(coilset=coilset, computational_boundary=computational_boundary)
+        coilset = CoilSet.from_mgrid_file(coilset_filename, computational_boundary)
+        return cls(coilset=coilset)
 
     @property
     def vns(self):
         if self._vns is None:
-            if self.computational_boundary is not self.coilset.surface:
-                raise ValueError('computational_boundary of CoilNormalField and CoilSet do not match')
             bnormal = np.sum(self.coilset.bs.B().reshape((self.computational_boundary.quadpoints_phi.size, self.computational_boundary.quadpoints_theta.size, 3)) * self.computational_boundary.normal()*-1, axis=2)
-            Vns, Vnc = self.computational_boundary.fourier_transform_field(bnormal[:, :], normalization=(2*np.pi)**2, stellsym=False)
+            Vns, Vnc = self.computational_boundary.fourier_transform_field(bnormal[:, :], normalization=(2*np.pi)**2, stellsym=self.stellsym)
             self._vns = Vns
             self._vnc = Vnc
         return self._vns
@@ -568,10 +566,8 @@ class CoilNormalField(NormalField):
     @property
     def vnc(self):
         if self._vnc is None:
-            if self.computational_boundary is not self.coilset.surface:
-                raise ValueError('computational_boundary of CoilNormalField and CoilSet do not match')
             bnormal = np.sum(self.coilset.bs.B().reshape((self.computational_boundary.quadpoints_phi.size, self.computational_boundary.quadpoints_theta.size, 3)) * self.computational_boundary.normal()*-1, axis=2)
-            Vns, Vnc = self.computational_boundary.fourier_transform_field(bnormal[:, :], normalization=(2*np.pi)**2, stellsym=False)
+            Vns, Vnc = self.computational_boundary.fourier_transform_field(bnormal[:, :], normalization=(2*np.pi)**2, stellsym=self.stellsym)
             self._vns = Vns
             self._vnc = Vnc
         return self._vnc
@@ -631,18 +627,28 @@ class CoilNormalField(NormalField):
         index = [m, n - self.ntor]
         return index
     
-    def optimize_coils(self, targetvns, targetvnc, TARGET_LENGTH, MAXITER=300):
-        """
-        optimize the coils to match the target vns and vnc. 
+    def optimize_coils(self, targetvns, targetvnc=None, TARGET_LENGTH=1000, MAXITER=300):
+        r"""
+        optimize the coils to match the target vns and vnc using a FOCUS-style algorithm.
 
         Uses the simplest FOCUS optimization consisting of only
         the quadratic flux penalty and a length penalty. 
+
+        Args: 
+            targetvns: The target odd fourier modes of :math:`\mathbf{B}\cdot\mathbf{\vec{n}}`. 2D array of size
+                (mpol+1)x(2ntor+1). 
+            targetvnc: The target even fourier modes of :math:`\mathbf{B}\cdot\mathbf{\vec{n}}`. 2D array of size
+                (mpol+1)x(2ntor+1). Ignored if stellsym if True. 
+            TARGET_LENGTH: The target length of the coils. Default is 1000. 
+            MAXITER: The maximum number of iterations. Default is 1000.
         """
         from scipy.optimize import minimize
+        if targetvnc is None:
+            targtetvnc = np.zeros_like(targetvns)
         BdotN_unnormalized = self.computational_boundary.inverse_fourier_transform_field(targetvns, targetvnc, normalization=(2*np.pi)**2, stellsym=self.stellsym)
-        target = BdotN_unnormalized / self.computational_boundary.unitnormal()
+        target = -1 * BdotN_unnormalized / np.linalg.norm(self.computational_boundary.normal(), axis=-1)
         JF = self.coilset.flux_penalty(target=target)\
-            + self.coilset.length_penalty(target=TARGET_LENGTH)
+            + self.coilset.length_penalty(TOTAL_LENGTH=TARGET_LENGTH)
         
         def fun(dofs):
             JF.x = dofs
@@ -652,6 +658,8 @@ class CoilNormalField(NormalField):
         
         res = minimize(fun, dofs, jac=True, method='L-BFGS-B',
                options={'maxiter': MAXITER, 'maxcor': 300, 'iprint': 5}, tol=1e-15)
+        print(f'the maximum difference between coil Vns and target Vns is: {np.max(np.abs(self.vns-targetvns))}')
+        print(f'The root mean squared difference between the Vns produced by the coils and the target is: {np.sqrt(np.mean((self.vns-targetvns)**2))}')
 
 
     
