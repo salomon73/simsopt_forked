@@ -1358,6 +1358,6 @@ class Residue(Optimizable):
 
         if self.fixed_point is None:
             raise ObjectiveFailure("Residue calculation failed")
-        logger.info(f"group {self.mpi.group} found residue {self.fixed_point.GreenesResidue} for {pp}/{qq}")
+        logger.info(f"group {self.mpi.group} found residue {self.fixed_point.GreenesResidue} for {self.pp}/{self.qq}")
 
         return self.fixed_point.GreenesResidue
