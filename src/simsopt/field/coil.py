@@ -436,7 +436,6 @@ class CoilSet(Optimizable):
         coils = load_coils_from_makegrid_file(makegrid_file, order=6, ppp=20)
         return cls(base_coils=coils, coils=coils, surface=surface)
 
-    
     @classmethod
     def for_spec_equil(cls, spec, coils_per_period=5, current_constraint="fix_all", **kwargs):
         """
@@ -520,6 +519,33 @@ class CoilSet(Optimizable):
             # take the magnitude of the first-order poloidal Fourier coefficient
             R1 = np.sqrt(surf.to_RZFourier().get_rc(1, 0)**2 + surf.to_RZFourier().get_zs(1, 0)**2) * factor
         return create_equally_spaced_curves(coils_per_period, nfp, stellsym=use_stellsym, R0=R0, R1=R1, order=order)
+     
+    def get_dof_orders(self):
+        """
+        get the Fourier order of the degrees of freedom  corresponding to the Fourier
+        coefficients describing the coils. 
+        Useful for reducing the trust region for the higher order coefficients.
+        in optimization. 
+
+        Returns:
+            An array with the fourier order of each degree of freedom.
+        """
+        import re
+        dof_names = self.dof_names
+        orders = np.ones(self.dof_size)
+        # test if coils are CurveXYZFourier:
+        if type(self.coils[0].curve) is not CurveXYZFourier:
+            raise ValueError("Coils must be of type CurveXYZFourier")
+        # run through names, extract order using regular expression
+        for name in dof_names:
+            if name.startswith("Curve"):
+                match = re.search(r'\((\d+)\)', name)
+                if match:
+                    order = int(match.group(1))
+                    if order > 0: # leave zeroth order alone
+                        orders[dof_names.index(name)] = order
+        return orders
+
     
     def flux_penalty(self, target=None):
         """
@@ -529,12 +555,13 @@ class CoilSet(Optimizable):
         from simsopt.objectives import SquaredFlux
         return SquaredFlux(self.surface, self.bs, target=target)
     
-    def length_penalty(self, TOTAL_LENGTH):
+    def length_penalty(self, TOTAL_LENGTH, f):
         """
         Return a QuadraticPenalty on the total length of the coils 
         if it is larger than TARGET_LENGTH (do not penalize if shorter)
         Args:
             TOTAL_LENGTH: The threshold length above which the penalty is applied
+            f: type of penalty, "min", "max" or "identity"
         """
         from simsopt.objectives import QuadraticPenalty
         from simsopt.geo import CurveLength
@@ -543,7 +570,7 @@ class CoilSet(Optimizable):
         # summing optimizables makes new optimizables
         lenth_optimizable = sum(CurveLength(coil.curve) for coil in self.base_coils)*coil_multiplication_factor
         # return the penalty function
-        return QuadraticPenalty(lenth_optimizable, TOTAL_LENGTH, "max")
+        return QuadraticPenalty(lenth_optimizable, TOTAL_LENGTH, f)
     
     def cc_distance_penalty(self, DISTANCE_THRESHOLD): 
         """
@@ -635,3 +662,63 @@ class CoilSet(Optimizable):
         plot(self.coils, **kwargs, show=False)
         #generate a full torus for plotting, plot it:
         SurfaceRZFourier.from_other_surface(self.surface.to_RZFourier(), range=SurfaceRZFourier.RANGE_FULL_TORUS).plot(**kwargs, show=True)
+
+class ReducedCoilSet(CoilSet):
+    """
+    An Optimizable that replaces a CoilSet but has as degrees of 
+    freedom linear combinations of the CoilSet degrees of freedom 
+
+    Single-stage optimization is often accompanied with an explosion
+    in the numbers of degrees of freedom needed to accurately represent
+    the stellarator, as each coilneeds 6 DOFs per coil per Fourier order. 
+    This makes solving the optimization problem harder in two ways: 
+    1: the computational cost of finite-difference gradient evaluation is
+    linear in the number of DOFs, and 2: the optimization problem can become 
+    rank-deficient: changes to your DOFs cancel each other, and the minmum 
+    is no longer unique. 
+
+    This class solves these problems by allowing physics-based dimensionality
+    reduction of the optimization space using singluar value-decomposition
+    of a fast-evalable map. 
+
+    A ReducedCoilSet consists of a Coilset, and the three elements of an SVD of
+    the Jacobian defined by a mapping from the coils' DOFs to a physically relevant, 
+    fast-evaluating target.  
+    """
+    def __init__(self, coilset, u_matrix, s_diag, vh_matrix):
+        # Reproduce CoilSet's attributes
+        self.coilset = coilset
+        self.base_coils = coilset.base_coils
+        self.coils = coilset.coils
+        self._surface = coilset.surface
+        self.bs = coilset.bs
+        self.bs.set_points(self._surface.gamma().reshape((-1, 3)))
+        # Add the SVD matrices
+        self._u_matrix = u_matrix
+        self._vh_matrix = vh_matrix
+        self._coil_x0 = self.coilset.x
+        self._s_diag = s_diag
+        Optimizable.__init__(self, x0=np.zeros_like(self._s_diag), names=self._make_names(), external_dof_setter=ReducedCoilSet.set_dofs)
+
+
+    @property
+    def surface(self):
+        return self.surface
+
+    @surface.setter
+    def surface(self, *args, **kwargs):
+        raise ValueError("Not supported yet")
+
+    def _make_names(self):
+        names = [f"DOFvector{n}" for n in range(len(self.s_diag))]
+        return names
+
+    def set_dofs(self, x):
+        #check if correct!
+        if len(x) != len(self.s_diag):
+            raise ValueError("Wrong number of DOFs")
+        self.x = x
+        self.coilset.x = self._coil_x0 + self._vh_matrix @ (x * self.s_diag)
+
+
+

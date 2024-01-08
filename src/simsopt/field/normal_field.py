@@ -476,6 +476,11 @@ class NormalField(Optimizable):
 
         self.set_vns_asarray(vns, mpol, ntor)
  
+    def get_real_space_field(self):
+        vns, vnc = self.get_vns_vnc_asarray(mpol = self.mpol, ntor=self.ntor)
+        BdotN_unnormalized = self.computational_boundary.inverse_fourier_transform_field(vns, vnc, normalization=(2*np.pi)**2, stellsym=self.stellsym)
+        normal_field_real_space = -1 * BdotN_unnormalized / np.linalg.norm(self.computational_boundary.normal(), axis=-1)
+        return normal_field_real_space
 
 class CoilNormalField(NormalField):
     """
