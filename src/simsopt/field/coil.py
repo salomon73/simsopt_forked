@@ -532,7 +532,7 @@ class CoilSet(Optimizable):
         """
         import re
         dof_names = self.dof_names
-        orders = np.ones(self.dof_size)
+        orders = np.zeros(self.dof_size) # dofs which are not Fourier coefficients are treated as zeroth' order.
         # test if coils are CurveXYZFourier:
         if type(self.coils[0].curve) is not CurveXYZFourier:
             raise ValueError("Coils must be of type CurveXYZFourier")
@@ -542,8 +542,7 @@ class CoilSet(Optimizable):
                 match = re.search(r'\((\d+)\)', name)
                 if match:
                     order = int(match.group(1))
-                    if order > 0: # leave zeroth order alone
-                        orders[dof_names.index(name)] = order
+                    orders[dof_names.index(name)] = order
         return orders
 
     
