@@ -477,10 +477,11 @@ class NormalField(Optimizable):
         self.set_vns_asarray(vns, mpol, ntor)
  
     def get_real_space_field(self):
-        vns, vnc = self.get_vns_vnc_asarray(mpol = self.mpol, ntor=self.ntor)
+        vns, vnc = self.get_vns_vnc_asarray(mpol=self.mpol, ntor=self.ntor)
         BdotN_unnormalized = self.computational_boundary.inverse_fourier_transform_field(vns, vnc, normalization=(2*np.pi)**2, stellsym=self.stellsym)
         normal_field_real_space = -1 * BdotN_unnormalized / np.linalg.norm(self.computational_boundary.normal(), axis=-1)
         return normal_field_real_space
+
 
 class CoilNormalField(NormalField):
     """
@@ -500,25 +501,25 @@ class CoilNormalField(NormalField):
         This property is cached, and recomputed only when the parents' DOFS (the
         coils) change.
     """
-    def __init__(self, coilset: 'CoilSet'=None):
+    def __init__(self, coilset: 'CoilSet' = None):
         self._vns = None
         self._vnc = None
 
         # Set coilset and boundary: if not given create standard ones. 
         if coilset is not None:
-            self.coilset = coilset
+            self._coilset = coilset
             self.computational_boundary = coilset.surface
         else:  
             from simsopt.field import CoilSet
             surface = SurfaceRZFourier()
-            self.coilset = CoilSet.for_surface(surface)
-            self.computational_boundary = self.coilset.surface
+            self._coilset = CoilSet.for_surface(surface)
+            self.computational_boundary = self._coilset.surface
 
         self.nfp = self.computational_boundary.nfp
         self.stellsym = self.computational_boundary.stellsym
         self.mpol = self.computational_boundary.mpol
         self.ntor = self.computational_boundary.ntor   
-        Optimizable.__init__(self, depends_on=[self.coilset])  # call the Optimizable constructor, skip the NormalField constructor
+        Optimizable.__init__(self, depends_on=[self._coilset])  # call the Optimizable constructor, skip the NormalField constructor
 
     @classmethod
     def from_spec_object(cls, spec, coils_per_period=6, optimize_coils=False, TARGET_LENGTH=1000):
@@ -580,6 +581,38 @@ class CoilNormalField(NormalField):
     @vnc.setter
     def vnc(self):
         raise AttributeError('you cannot set vnc, the coils do this!')
+    
+    @property
+    def coilset(self):
+        return self._coilset
+    
+    @coilset.setter  # TODO: change DOFS and replace parent correctly!!
+    def coilset(self, coilset):
+        from simsopt.field import CoilSet, ReducedCoilSet
+        assert isinstance(coilset, (CoilSet, ReducedCoilSet))
+        self.remove_parent(self._coilset)
+        self._coilset = coilset
+        self.append_parent(coilset)
+        self.recompute_bell()
+    
+    def reduce_coilset(self, nsv='nonzero'):
+        """
+        Replace the coilset with a ReducedCoilSet keeping the first nsv singular values.
+        """
+        from simsopt.field import ReducedCoilSet
+        thiscoilset = self.coilset
+        if type(self.coilset) is ReducedCoilSet:
+            thiscoilset = self.coilset.coilset
+        
+        def target_function(coilset): 
+            cnf = CoilNormalField(coilset)
+            output = cnf.vns.ravel()[coilset.surface.ntor+1:]
+            if not coilset.surface.stellsym:
+                np.append(output, cnf.vnc.ravel()[coilset.surface.ntor:])
+            return np.ravel(output)
+        
+        reduced_coilset = ReducedCoilSet.from_function(thiscoilset, target_function, nsv=nsv)
+        self.coilset = reduced_coilset
 
     def recompute_bell(self, parent=None):  # Should parent be CoilSet?
         self._vnc = None
@@ -662,7 +695,7 @@ class CoilNormalField(NormalField):
         dofs = JF.x
         
         res = minimize(fun, dofs, jac=True, method='L-BFGS-B',
-               options={'maxiter': MAXITER, 'maxcor': 300, 'iprint': 5}, tol=1e-15)
+                       options={'maxiter': MAXITER, 'maxcor': 300, 'iprint': 5}, tol=1e-15)
         print(f'the maximum difference between coil Vns and target Vns is: {np.max(np.abs(self.vns-targetvns))}')
         print(f'The root mean squared difference between the Vns produced by the coils and the target is: {np.sqrt(np.mean((self.vns-targetvns)**2))}')
 

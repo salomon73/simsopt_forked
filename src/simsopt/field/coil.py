@@ -10,7 +10,7 @@ import simsoptpp as sopp
 
 __all__ = ['Coil', 'Current', 'coils_via_symmetries', 'load_coils_from_makegrid_file',
            'apply_symmetries_to_currents', 'apply_symmetries_to_curves',
-           'coils_to_makegrid', 'coils_to_focus', 'CoilSet']
+           'coils_to_makegrid', 'coils_to_focus', 'CoilSet', 'ReducedCoilSet']
 
 
 class Coil(sopp.Coil, Optimizable):
@@ -391,7 +391,7 @@ class CoilSet(Optimizable):
         super().__init__(depends_on=base_coils)
 
     @classmethod
-    def for_surface(cls, surf, coil_current=1e5, coils_per_period=5, nfp=None, current_constraint="fix_all", **kwargs ): 
+    def for_surface(cls, surf, coil_current=1e5, coils_per_period=5, nfp=None, current_constraint="fix_all", **kwargs): 
         """
         Create a CoilSet for a given surface. The coils are created using
         :obj:`create_equally_spaced_curves` with the given parameters.
@@ -461,7 +461,7 @@ class CoilSet(Optimizable):
         nfp = spec.nfp
         use_stellsym = spec.stellsym
         total_current = spec.poloidal_current_amperes
-        total_coil_number = coils_per_period * nfp * (1 + int(use_stellsym)) #only coils for half-period
+        total_coil_number = coils_per_period * nfp * (1 + int(use_stellsym))  # only coils for half-period
         if spec.freebound: 
             surface = spec.computational_boundary
         else: 
@@ -532,7 +532,7 @@ class CoilSet(Optimizable):
         """
         import re
         dof_names = self.dof_names
-        orders = np.zeros(self.dof_size) # dofs which are not Fourier coefficients are treated as zeroth' order.
+        orders = np.zeros(self.dof_size)  # dofs which are not Fourier coefficients are treated as zeroth' order.
         # test if coils are CurveXYZFourier:
         if type(self.coils[0].curve) is not CurveXYZFourier:
             raise ValueError("Coils must be of type CurveXYZFourier")
@@ -545,7 +545,6 @@ class CoilSet(Optimizable):
                     orders[dof_names.index(name)] = order
         return orders
 
-    
     def flux_penalty(self, target=None):
         """
         Return the penalty function for the quadratic flux penalty on 
@@ -591,7 +590,6 @@ class CoilSet(Optimizable):
         curves = [coil.curve for coil in self.coils]
         return CurveSurfaceDistance(curves, self.surface, DISTANCE_THRESHOLD)
 
-    
     def lp_curvature_penalty(self, CURVATURE_THRESHOLD, p=2):
         """
         Return a penalty function on the curvature of the coils that is 
@@ -648,7 +646,6 @@ class CoilSet(Optimizable):
                 pointData = None
             self.surface.to_vtk(filename+'_surface', extra_data=pointData)
 
-
     def plot(self, **kwargs):
         """
         Plot the coil's curve. This method is just shorthand for calling
@@ -662,9 +659,10 @@ class CoilSet(Optimizable):
         #generate a full torus for plotting, plot it:
         SurfaceRZFourier.from_other_surface(self.surface.to_RZFourier(), range=SurfaceRZFourier.RANGE_FULL_TORUS).plot(**kwargs, show=True)
 
+
 class ReducedCoilSet(CoilSet):
     """
-    An Optimizable that replaces a CoilSet but has as degrees of 
+    An Optimizable that replaces a CoilSet and has as degrees of 
     freedom linear combinations of the CoilSet degrees of freedom 
 
     Single-stage optimization is often accompanied with an explosion
@@ -684,7 +682,21 @@ class ReducedCoilSet(CoilSet):
     the Jacobian defined by a mapping from the coils' DOFs to a physically relevant, 
     fast-evaluating target.  
     """
-    def __init__(self, coilset, u_matrix, s_diag, vh_matrix):
+    def __init__(self, coilset=None, nsv=None, s_diag=None, u_matrix=None, vh_matrix=None):
+        """
+        create a ReducedCoilSet from a CoilSet and the three elements of an SVD of the Jacobian of a mapping. 
+        """
+        # create standards if initialized with None
+        if coilset is None:  # need 'is' (idenity comparison), overloaded __eq__ fails here. 
+            coilset = CoilSet()
+        if nsv is None:
+            nsv = coilset.dof_size
+        if s_diag is None: 
+            s_diag = np.ones(nsv)
+        if u_matrix is None:
+            u_matrix = np.eye(nsv)
+        if vh_matrix is None:
+            vh_matrix = np.eye(nsv)
         # Reproduce CoilSet's attributes
         self.coilset = coilset
         self.base_coils = coilset.base_coils
@@ -693,31 +705,136 @@ class ReducedCoilSet(CoilSet):
         self.bs = coilset.bs
         self.bs.set_points(self._surface.gamma().reshape((-1, 3)))
         # Add the SVD matrices
+        self.nsv = nsv
         self._u_matrix = u_matrix
         self._vh_matrix = vh_matrix
         self._coil_x0 = self.coilset.x
         self._s_diag = s_diag
-        Optimizable.__init__(self, x0=np.zeros_like(self._s_diag), names=self._make_names(), external_dof_setter=ReducedCoilSet.set_dofs)
+        Optimizable.__init__(self, x0=np.zeros_like(self._s_diag[:nsv]), names=self._make_names(), external_dof_setter=ReducedCoilSet.set_dofs)
 
+    @classmethod
+    def from_function(cls, coilset, target_function, nsv='nonzero', threshold=1e-08):
+        """
+        Reduce an existing CoilSet to a ReducedCoilSet using the SVD of the mapping
+        given by target_function. 
+        Args:
+            coilset: The CoilSet to reduce
+            target_function: a function that takes a CoilSet and maps to a different space that is relevant for the optimization problem. 
+                The SVD will be calculated on the Jacobian of f: coilDOFs -> target
+                For example a function that calculates the fourier coefficients of the
+                normal field on the surface. 
+            nsv: The number of singular values to keep, 'nonzero' or 'greaterthan' defaults to 'nonzero'. 
+                If 'nonzero', all nonzero singular values are kept.
+                If 'greaterthan', all singular values greater than threshold are kept.
+            
+                 
+        """
+        from simsopt._core.finite_difference import FiniteDifference
+        from simsopt._core import make_optimizable
+        function = make_optimizable(target_function, coilset)
+        fd = FiniteDifference(function.J)
+        jaccers = fd.jac()
+        u_matrix, s_diag, vh_matrix = np.linalg.svd(jaccers)
+        if nsv == 'nonzero':
+            nsv = len(s_diag)
+        else: 
+            assert isinstance(nsv, int), "nsv must be an integer or 'nonzero'"
+        return cls(coilset, nsv, s_diag, u_matrix, vh_matrix)
 
     @property
     def surface(self):
-        return self.surface
+        return self._surface
+    
+    @property 
+    def rsv(self):
+        """
+        right-singular vectors of the svd
+        """
+        return self._vh_matrix.tolist()
+    
+    @property
+    def lsv(self):
+        """
+        left-singular vectors of the svd
+        """
+        return self._u_matrix.T.tolist()
 
     @surface.setter
     def surface(self, *args, **kwargs):
+        """
+        settiing a new surface requires re-calculating
+        the SVD matrices. 
+        """
         raise ValueError("Not supported yet")
 
     def _make_names(self):
-        names = [f"DOFvector{n}" for n in range(len(self.s_diag))]
+        names = [f"sv{n}" for n in range(len(self._s_diag))]
         return names
 
     def set_dofs(self, x):
         #check if correct!
-        if len(x) != len(self.s_diag):
+        if len(x) != self.nsv:
             raise ValueError("Wrong number of DOFs")
-        self.x = x
-        self.coilset.x = self._coil_x0 + self._vh_matrix @ (x * self.s_diag)
+        padx = np.pad(x, (0, len(self._coil_x0)-self.nsv), mode='constant', constant_values=0)
+        pads= np.pad(self._s_diag[:self.nsv], (0, len(self._coil_x0) - self.nsv), mode='constant', constant_values=0)
+        self.coilset.x = self._coil_x0 + (padx * pads) @ self._vh_matrix  # multiply x by singular value so that low singular values have less effect. [could also put in trust region... is this best? or divide by?]
 
+    def plot_singular_vector(self, n, eps=1e-4, show_delta_B=True, engine='mayavi', show=False, **kwargs):
+        """
+        Plot the n-th singular vector. 
+        args: 
+            n: the index of the singular vector
+            eps: the magnitude of the displacement. 
+            show_delta_B: whether to show the change in the magnetic field
+            engine: the plotting engine to use. Defaults to 'mayavi'
+        """
+        from simsopt.geo import plot, SurfaceRZFourier
+        from mayavi import mlab
+        if n > self.nsv:
+            raise ValueError("n must be smaller than the number of singular values")
+        singular_vector = np.array(self.rsv[n])
 
+        plotsurf = SurfaceRZFourier.from_other_surface(self.surface, range=SurfaceRZFourier.RANGE_FULL_TORUS)
+        if show_delta_B:
+            bs = self.bs
+            initial_points = self.bs.get_points_cart_ref()
+            bs.set_points(plotsurf.gamma().reshape((-1, 3)))
 
+        current_x = np.copy(self.x)
+        startpositions = [np.copy(coil.curve.gamma()) for coil in self.coilset.coils]
+        if show_delta_B:
+            startB = np.copy(np.sum(bs.B().reshape((plotsurf.quadpoints_phi.size, plotsurf.quadpoints_theta.size, 3)) * plotsurf.unitnormal()*-1, axis=2))
+            startB = np.concatenate((startB, startB[:1,:]), axis=0)
+            startB = np.concatenate((startB, startB[:,:1]), axis=1)
+        
+        # Perturb the coils by the singular vector
+        self.coilset.x = self.coilset.x + singular_vector*eps
+        newpositions = [np.copy(coil.curve.gamma()) for coil in self.coilset.coils]
+        if show_delta_B:
+            changedB = np.copy(np.sum(bs.B().reshape((plotsurf.quadpoints_phi.size, plotsurf.quadpoints_theta.size, 3)) * plotsurf.unitnormal()*-1, axis=2))
+            # close the plot
+            changedB = np.concatenate((changedB, changedB[:1,:]), axis=0)
+            changedB = np.concatenate((changedB, changedB[:,:1]), axis=1)
+        # plot the displacement vectors
+        for newcoilpos, startcoilpos in zip(newpositions, startpositions):
+            diffs = (0.05/eps)* (startcoilpos - newcoilpos)
+            x = startcoilpos[:, 0]
+            y = startcoilpos[:, 1]
+            z = startcoilpos[:, 2]
+            # enlarge the difference vectors for better visibility
+            dx = diffs[:, 0]
+            dy = diffs[:, 1]
+            dz = diffs[:, 2]
+            mlab.quiver3d(x, y, z, dx, dy, dz, line_width=4, **kwargs)
+        
+        if show_delta_B:
+            plot([plotsurf,], engine='mayavi', wireframe=False, close=True, scalars=changedB-startB, colormap='Reds', show=False, **kwargs)
+        else:
+            plot([plotsurf,], engine='mayavi', wireframe=False, close=True, colormap='Reds', show=False, **kwargs)
+        # plot the original coils again
+        self.x = current_x
+        plot(self.coilset.coils, close=True, engine='mayavi', color=(1,1,1), show=show, **kwargs)
+        # set bs set points back
+        if show_delta_B:
+            bs.set_points(initial_points)
+        return changedB, startB

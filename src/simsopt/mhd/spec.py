@@ -367,7 +367,7 @@ class Spec(Optimizable):
                 self._boundary = boundary
                 self.append_parent(boundary)
                 return
-        else: #in freeboundary case, plasma boundary is is not a parent
+        else:  # in freeboundary case, plasma boundary is is not a parent
             self._boundary = boundary
     
     @property
@@ -391,7 +391,6 @@ class Spec(Optimizable):
             self._normal_field = normal_field
             self.append_parent(normal_field)
             return
-
 
     @property
     def computational_boundary(self):
@@ -941,8 +940,8 @@ class Spec(Optimizable):
             si.zac[0:mn] = self.axis['zac']
 
         # Set initial guess
-        if self.initial_guess is not None: # note: self.initial_guess is None for workers!! only leaders read and do_stuff with initial_guess
-            self._set_spec_initial_guess() # workers get the info through a broadcast. this line fails if workers get a guess set
+        if self.initial_guess is not None:  # note: self.initial_guess is None for workers!! only leaders read and do_stuff with initial_guess
+            self._set_spec_initial_guess()  # workers get the info through a broadcast. this line fails if workers get a guess set
 
             # write the boundary which is a guess in freeboundary
             if self.freebound:
@@ -1050,7 +1049,7 @@ class Spec(Optimizable):
                 logger.debug('About to call check_inputs')
                 spec.allglobal.check_inputs()
             logger.debug('About to call broadcast_inputs')
-            self.mpi.comm_groups.Barrier() # wait for 
+            self.mpi.comm_groups.Barrier()  # wait for 
             spec.allglobal.broadcast_inputs()
             logger.debug('About to call preset')
             spec.preset()
@@ -1133,7 +1132,7 @@ class Spec(Optimizable):
 
             # Enforce SPEC to use initial guess, but only group leaders have the necessary arrays
             if self.mpi.proc0_groups:
-                self.initial_guess = new_guess  #set this here? or make whole above monster proc0-exclusive
+                self.initial_guess = new_guess  # set this here? or make whole above monster proc0-exclusive
             self.inputlist.linitialize = 0
 
         # Group leaders handle deletion of files:
@@ -1184,8 +1183,6 @@ class Spec(Optimizable):
         coil_normal_field = CoilNormalField.from_spec_object(self, optimize_coils=True, TARGET_LENGTH=TARGET_LENGTH)
         self.normal_field = coil_normal_field
         
-
-    
     def array_translator(self, array=None, style='spec'):
         """
         Returns a SpecFourierArray object to help transforming between
