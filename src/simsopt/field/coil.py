@@ -551,7 +551,12 @@ class CoilSet(Optimizable):
         the surface
         """
         from simsopt.objectives import SquaredFlux
-        return SquaredFlux(self.surface, self.bs, target=target)
+        target = SquaredFlux(self.surface, self.bs, target=target)
+        # make self parent as self's dofs will propagate to coils
+        for parent in target.parents: 
+            target.remove_parent(parent)
+        target.append_parent(self)
+        return target
     
     def length_penalty(self, TOTAL_LENGTH, f):
         """
@@ -567,8 +572,13 @@ class CoilSet(Optimizable):
         coil_multiplication_factor = len(self.coils) / len(self.base_coils)
         # summing optimizables makes new optimizables
         lenth_optimizable = sum(CurveLength(coil.curve) for coil in self.base_coils)*coil_multiplication_factor
+        target = QuadraticPenalty(lenth_optimizable, TOTAL_LENGTH, f)
+        # make self parent as self's dofs will propagate to coils
+        for parent in target.parents: 
+            target.remove_parent(parent)
+        target.append_parent(self)
         # return the penalty function
-        return QuadraticPenalty(lenth_optimizable, TOTAL_LENGTH, f)
+        return target
     
     def cc_distance_penalty(self, DISTANCE_THRESHOLD): 
         """
@@ -578,7 +588,13 @@ class CoilSet(Optimizable):
         """
         from simsopt.geo import CurveCurveDistance
         curves = [coil.curve for coil in self.coils]
-        return CurveCurveDistance(curves, DISTANCE_THRESHOLD, num_basecurves=len(self.base_coils))
+        target = CurveCurveDistance(curves, DISTANCE_THRESHOLD, num_basecurves=len(self.base_coils))
+        # make self parent as self's dofs will propagate to coils
+        for parent in target.parents: 
+            target.remove_parent(parent)
+        target.append_parent(self)
+        # return the penalty function
+        return target
     
     def cs_distance_penalty(self, DISTANCE_THRESHOLD):
         """
@@ -600,14 +616,25 @@ class CoilSet(Optimizable):
         """
         from simsopt.geo import LpCurveCurvature
         base_curves = [coil.curve for coil in self.base_coils]
-        return sum(LpCurveCurvature(curve, p, CURVATURE_THRESHOLD) for curve in base_curves)
+        target = sum(LpCurveCurvature(curve, p, CURVATURE_THRESHOLD) for curve in base_curves)
+        # make self parent as self's dofs will propagate to coils
+        for parent in target.parents: 
+            target.remove_parent(parent)
+        target.append_parent(self)
+        # return the penalty function
+        return target
     
     def meansquared_curvature_penalty(self):
         """
         Return a penalty function on the mean squared curvature of the coils
         """
         from simsopt.geo import MeanSquaredCurvature
-        return sum(MeanSquaredCurvature(coil.curve) for coil in self.base_coils)
+        target = sum(MeanSquaredCurvature(coil.curve) for coil in self.base_coils)
+        for parent in target.parents: 
+            target.remove_parent(parent)
+        target.append_parent(self)
+        # return the penalty function
+        return target
     
     def meansquared_curvature_threshold(self, CURVATURE_THRESHOLD):
         """
@@ -616,14 +643,24 @@ class CoilSet(Optimizable):
         from simsopt.geo import MeanSquaredCurvature
         from simsopt.objectives import QuadraticPenalty
         meansquaredcurvatures = [MeanSquaredCurvature(coil.curve) for coil in self.base_coils]
-        return sum(QuadraticPenalty(msc, CURVATURE_THRESHOLD, "max") for msc in meansquaredcurvatures)
+        target = sum(QuadraticPenalty(msc, CURVATURE_THRESHOLD, "max") for msc in meansquaredcurvatures)
+        for parent in target.parents: 
+            target.remove_parent(parent)
+        target.append_parent(self)
+        # return the penalty function
+        return target
     
     def arc_length_variation_penalty(self):
         """
         Return a penalty function on the arc length variation of the coils
         """
         from simsopt.geo import ArclengthVariation
-        return sum(ArclengthVariation(coil.curve) for coil in self.base_coils)
+        target = sum(ArclengthVariation(coil.curve) for coil in self.base_coils)
+        for parent in target.parents: 
+            target.remove_parent(parent)
+        target.append_parent(self)
+        # return the penalty function
+        return target
     
     def total_length(self):
         """
@@ -631,7 +668,12 @@ class CoilSet(Optimizable):
         """
         from simsopt.geo import CurveLength
         multiplicity = len(self.coils) / len(self.base_coils)
-        return sum(CurveLength(coil.curve) for coil in self.base_coils)*multiplicity
+        target = sum(CurveLength(coil.curve) for coil in self.base_coils)*multiplicity
+        for parent in target.parents: 
+            target.remove_parent(parent)
+        target.append_parent(self)
+        # return the penalty function
+        return target
     
     def to_vtk(self, filename, add_biotsavart=True, close=False):
         """
@@ -766,9 +808,15 @@ class ReducedCoilSet(CoilSet):
         the SVD matrices. 
         """
         raise ValueError("Not supported yet")
+    
+    def get_dof_orders(self):
+        """
+        Not available for a ReducedCoilSet
+        """
+        raise ValueError("Not available for a ReducedCoilSet")
 
     def _make_names(self):
-        names = [f"sv{n}" for n in range(len(self._s_diag))]
+        names = [f"sv{n}" for n in range(len(self._s_diag[:self.nsv]))]
         return names
 
     def set_dofs(self, x):
@@ -776,7 +824,7 @@ class ReducedCoilSet(CoilSet):
         if len(x) != self.nsv:
             raise ValueError("Wrong number of DOFs")
         padx = np.pad(x, (0, len(self._coil_x0)-self.nsv), mode='constant', constant_values=0)
-        pads= np.pad(self._s_diag[:self.nsv], (0, len(self._coil_x0) - self.nsv), mode='constant', constant_values=0)
+        pads = np.pad(self._s_diag[:self.nsv], (0, len(self._coil_x0) - self.nsv), mode='constant', constant_values=0)
         self.coilset.x = self._coil_x0 + (padx * pads) @ self._vh_matrix  # multiply x by singular value so that low singular values have less effect. [could also put in trust region... is this best? or divide by?]
 
     def plot_singular_vector(self, n, eps=1e-4, show_delta_B=True, engine='mayavi', show=False, **kwargs):
@@ -804,8 +852,8 @@ class ReducedCoilSet(CoilSet):
         startpositions = [np.copy(coil.curve.gamma()) for coil in self.coilset.coils]
         if show_delta_B:
             startB = np.copy(np.sum(bs.B().reshape((plotsurf.quadpoints_phi.size, plotsurf.quadpoints_theta.size, 3)) * plotsurf.unitnormal()*-1, axis=2))
-            startB = np.concatenate((startB, startB[:1,:]), axis=0)
-            startB = np.concatenate((startB, startB[:,:1]), axis=1)
+            startB = np.concatenate((startB, startB[:1, :]), axis=0)
+            startB = np.concatenate((startB, startB[:, :1]), axis=1)
         
         # Perturb the coils by the singular vector
         self.coilset.x = self.coilset.x + singular_vector*eps
@@ -813,11 +861,11 @@ class ReducedCoilSet(CoilSet):
         if show_delta_B:
             changedB = np.copy(np.sum(bs.B().reshape((plotsurf.quadpoints_phi.size, plotsurf.quadpoints_theta.size, 3)) * plotsurf.unitnormal()*-1, axis=2))
             # close the plot
-            changedB = np.concatenate((changedB, changedB[:1,:]), axis=0)
-            changedB = np.concatenate((changedB, changedB[:,:1]), axis=1)
+            changedB = np.concatenate((changedB, changedB[:1, :]), axis=0)
+            changedB = np.concatenate((changedB, changedB[:, :1]), axis=1)
         # plot the displacement vectors
         for newcoilpos, startcoilpos in zip(newpositions, startpositions):
-            diffs = (0.05/eps)* (startcoilpos - newcoilpos)
+            diffs = (0.05/eps) * (startcoilpos - newcoilpos)
             x = startcoilpos[:, 0]
             y = startcoilpos[:, 1]
             z = startcoilpos[:, 2]
@@ -833,7 +881,7 @@ class ReducedCoilSet(CoilSet):
             plot([plotsurf,], engine='mayavi', wireframe=False, close=True, colormap='Reds', show=False, **kwargs)
         # plot the original coils again
         self.x = current_x
-        plot(self.coilset.coils, close=True, engine='mayavi', color=(1,1,1), show=show, **kwargs)
+        plot(self.coilset.coils, close=True, engine='mayavi', color=(1, 1, 1), show=show, **kwargs)
         # set bs set points back
         if show_delta_B:
             bs.set_points(initial_points)

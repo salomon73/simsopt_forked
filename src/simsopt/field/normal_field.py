@@ -586,7 +586,7 @@ class CoilNormalField(NormalField):
     def coilset(self):
         return self._coilset
     
-    @coilset.setter  # TODO: change DOFS and replace parent correctly!!
+    @coilset.setter  
     def coilset(self, coilset):
         from simsopt.field import CoilSet, ReducedCoilSet
         assert isinstance(coilset, (CoilSet, ReducedCoilSet))
@@ -597,7 +597,10 @@ class CoilNormalField(NormalField):
     
     def reduce_coilset(self, nsv='nonzero'):
         """
-        Replace the coilset with a ReducedCoilSet keeping the first nsv singular values.
+        Replace the coilset with a Re:w
+        ducedCoilSet keeping the first nsv singular values.
+
+        Note: Should this be done by proc0 and broadcast? Is SVD deterministic?
         """
         from simsopt.field import ReducedCoilSet
         thiscoilset = self.coilset
@@ -612,7 +615,12 @@ class CoilNormalField(NormalField):
             return np.ravel(output)
         
         reduced_coilset = ReducedCoilSet.from_function(thiscoilset, target_function, nsv=nsv)
-        self.coilset = reduced_coilset
+        logger.info(f'CoilNormalField replaced Coilset with ReducedCoilsSet with {reduced_coilset.nsv} singular values')
+        logger.debug(f'first right-singular vector: ')
+        logger.debug(reduced_coilset.rsv[0])
+        logger.debug('singular values: ')
+        logger.debug(reduced_coilset._s_diag)
+        self.coilset = reduced_coilset  # using setter; replaces parent
 
     def recompute_bell(self, parent=None):  # Should parent be CoilSet?
         self._vnc = None
