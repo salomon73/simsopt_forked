@@ -824,8 +824,8 @@ class ReducedCoilSet(CoilSet):
         if len(x) != self.nsv:
             raise ValueError("Wrong number of DOFs")
         padx = np.pad(x, (0, len(self._coil_x0)-self.nsv), mode='constant', constant_values=0)
-        pads = np.pad(self._s_diag[:self.nsv], (0, len(self._coil_x0) - self.nsv), mode='constant', constant_values=0)
-        self.coilset.x = self._coil_x0 + (padx * pads) @ self._vh_matrix  # multiply x by singular value so that low singular values have less effect. [could also put in trust region... is this best? or divide by?]
+        #pads = np.pad(self._s_diag[:self.nsv], (0, len(self._coil_x0) - self.nsv), mode='constant', constant_values=0)
+        self.coilset.x = self._coil_x0 + (padx ) @ self._vh_matrix  # multiply x by singular value so that low singular values have less effect. [could also put in trust region... is this best? or divide by?]
 
     def plot_singular_vector(self, n, eps=1e-4, show_delta_B=True, engine='mayavi', show=False, **kwargs):
         """
