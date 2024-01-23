@@ -724,7 +724,7 @@ class ReducedCoilSet(CoilSet):
     the Jacobian defined by a mapping from the coils' DOFs to a physically relevant, 
     fast-evaluating target.  
     """
-    def __init__(self, coilset=None, nsv=None, s_diag=None, u_matrix=None, vh_matrix=None):
+    def __init__(self, coilset=None, nsv=None, s_diag=None, u_matrix=None, vh_matrix=None, **kwargs):
         """
         create a ReducedCoilSet from a CoilSet and the three elements of an SVD of the Jacobian of a mapping. 
         """
@@ -752,7 +752,7 @@ class ReducedCoilSet(CoilSet):
         self._vh_matrix = vh_matrix
         self._coil_x0 = self.coilset.x
         self._s_diag = s_diag
-        Optimizable.__init__(self, x0=np.zeros_like(self._s_diag[:nsv]), names=self._make_names(), external_dof_setter=ReducedCoilSet.set_dofs)
+        Optimizable.__init__(self, x0=np.zeros_like(self._s_diag[:nsv]), names=self._make_names(), external_dof_setter=ReducedCoilSet.set_dofs, **kwargs)
 
     @classmethod
     def from_function(cls, coilset, target_function, nsv='nonzero', threshold=1e-08):
