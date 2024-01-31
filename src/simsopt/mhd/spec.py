@@ -133,12 +133,14 @@ class Spec(Optimizable):
             # Read default input file, which should be in the same
             # directory as this file:
             filename = os.path.join(os.path.dirname(__file__), 'defaults.sp')
-            logger.info(
-                f"Initializing a SPEC object from defaults in {filename}")
+            if self.mpi.proc0_groups:
+                logger.info(
+                    f"Initializing a SPEC object from defaults in {filename}")
         else:
             if not filename.endswith('.sp'):
                 filename = f"{filename}.sp"
-            logger.info(f"Initializing a SPEC object from file: {filename}")
+            if mpi.proc0_groups:
+                logger.info(f"Group {self.mpi.group}: Initializing a SPEC object from file: {filename}")
 
         # Initialize the FORTRAN state with values in the input file:
         self._init_fortran_state(filename)
@@ -895,7 +897,8 @@ class Spec(Optimizable):
         if not self.need_to_run_code:
             logger.info("run() called but no need to re-run SPEC.")
             return
-        logger.info("Preparing to run SPEC.")
+        if self.mpi.proc0_groups:
+            logger.info(f"Group {self.mpi.group}: Preparing to run SPEC.")
         self.counter += 1
 
         si = self.inputlist  # Shorthand
@@ -1082,8 +1085,8 @@ class Spec(Optimizable):
             if self.verbose:
                 traceback.print_exc()
             raise ObjectiveFailure("SPEC did not run successfully.")
-
-        logger.info("SPEC run complete.")
+        if self.mpi.proc0_groups:
+            logger.info(f"Group {self.mpi.group}: SPEC run complete.")
         # Barrier so workers do not try to read the .h5 file before it
         # is finished:
         self.mpi.comm_groups.Barrier()
@@ -1097,7 +1100,8 @@ class Spec(Optimizable):
             raise ObjectiveFailure(
                 "Unable to read results following SPEC execution")
 
-        logger.info("Successfully loaded SPEC results.")
+        if self.mpi.proc0_groups:
+            logger.info("Successfully loaded SPEC results.")
         self.need_to_run_code = False
 
         # Deal with unconverged equilibria - these are excluded by 
@@ -1335,7 +1339,7 @@ class Residue(Optimizable):
             self.spec.run()
         
         if not self.mpi.proc0_groups:
-            logger.info(
+            logger.debug(
                 "This proc is skipping Residue.J() since it is not a group leader.")
             return 0.0
         else:
@@ -1355,6 +1359,6 @@ class Residue(Optimizable):
 
         if self.fixed_point is None:
             raise ObjectiveFailure("Residue calculation failed")
-        logger.info(f"group {self.mpi.group} found residue {self.fixed_point.GreenesResidue} for {self.pp}/{self.qq}")
+        logger.info(f"group {self.mpi.group} found residue {self.fixed_point.GreenesResidue} for {self.pp}/{self.qq} in {self.spec.allglobal.ext}")
 
         return self.fixed_point.GreenesResidue
