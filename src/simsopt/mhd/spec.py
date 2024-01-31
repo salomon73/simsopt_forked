@@ -903,6 +903,10 @@ class Spec(Optimizable):
 
         si = self.inputlist  # Shorthand
 
+        # if freeboundary, store plasma-caused boundary field to re-set if run does not converge
+        if self.freebound:
+            (initial_bns, initial_bnc) = (si.bns, si.bnc)
+
         # Check that number of volumes in internal memory is consistent with
         # the input file
         if self.nvol != si.nvol:
@@ -1107,9 +1111,19 @@ class Spec(Optimizable):
         # Deal with unconverged equilibria - these are excluded by 
         # the optimizer, and the objective function is set to a large number
         if self.results.output.ForceErr > self.tolerance:
+            # re-set the boundary field guess before failing, so the next run does not start unconverged. 
+            if self.freebound:
+                si.bns, si.bnc = initial_bns, initial_bnc
             raise ObjectiveFailure(
                 'SPEC could not find force balance'
             )
+        # TODO: add check for picard convergence once SPEC is updated
+        # if self.results.output.<bnsERR> > self.inputlist.gbntol
+#            if self.freebound:
+#                si.bns, si.bnc = initial_bns, initial_bnc
+#            raise ObjectiveFailure(
+#                'SPEC could not find force balance'
+#            )
 
         # Save geometry as initial guess for next iterations
         if update_guess:
