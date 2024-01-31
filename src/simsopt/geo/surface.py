@@ -816,11 +816,10 @@ class Surface(Optimizable):
         if np.isclose(self.quadpoints_phi[-1], 1-1/len(self.quadpoints_phi), atol=1e-10):
             return Surface.RANGE_FULL_TORUS
         elif self.quadpoints_phi[0] == 0:
-            return  Surface.RANGE_FIELD_PERIOD
+            return Surface.RANGE_FIELD_PERIOD
         else:
             return Surface.RANGE_HALF_PERIOD
         
-
 
 def signed_distance_from_surface(xyz, surface):
     """
