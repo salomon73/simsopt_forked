@@ -139,7 +139,7 @@ class Spec(Optimizable):
         else:
             if not filename.endswith('.sp'):
                 filename = f"{filename}.sp"
-            if mpi.proc0_groups:
+            if self.mpi.proc0_groups:
                 logger.info(f"Group {self.mpi.group}: Initializing a SPEC object from file: {filename}")
 
         # Initialize the FORTRAN state with values in the input file:
