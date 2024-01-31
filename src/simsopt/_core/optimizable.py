@@ -688,7 +688,7 @@ class Optimizable(ABC_Callable, Hashable, GSONable, metaclass=OptimizableMeta):
         self.update_free_dof_size_indices()
         # Inform the object that it doesn't have valid cache
         self.set_recompute_flag()
-        log.debug(f"Unused arguments for {self.__class__} are {kwargs}")
+        #log.debug(f"Unused arguments for {self.__class__} are {kwargs}")
         super().__init__()
 
         # Keep this at the end because the function refers to Optimizable object
