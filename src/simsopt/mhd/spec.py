@@ -1113,18 +1113,26 @@ class Spec(Optimizable):
         if self.results.output.ForceErr > self.tolerance:
             # re-set the boundary field guess before failing, so the next run does not start unconverged. 
             if self.freebound:
+                logger.info(f"Group {self.mpi.group}: Force balance unconverged, re-setting boundary field guess and raising ObjectiveFailure")
                 si.bns, si.bnc = initial_bns, initial_bnc
             raise ObjectiveFailure(
                 'SPEC could not find force balance'
             )
-        # TODO: add check for picard convergence once SPEC is updated
-        # if self.results.output.<bnsERR> > self.inputlist.gbntol
-#            if self.freebound:
-#                si.bns, si.bnc = initial_bns, initial_bnc
-#            raise ObjectiveFailure(
-#                'SPEC could not find force balance'
-#            )
-
+        
+        # check for picard convergence once SPEC is updated
+        if self.freebound:
+            try: 
+                if self.results.output.BnsErr > self.inputlist.gbntol:
+                    if self.mpi.proc0_groups:
+                        logger.info(f"Group {self.mpi.group}: Picard iteration unconverged, re-setting boundary field guess and raising ObjectiveFailure")
+                    si.bns, si.bnc = initial_bns, initial_bnc
+                    raise ObjectiveFailure(
+                        'Picard iteration failed to reach convergence, increase mfreeits or gbntol'
+                    )
+            except AttributeError:
+                logger.info('Picard convergence not checked, please update SPEC version 3.22 or higher')
+                print("Picard convergence not checked, please update SPEC version 3.22 or higher")
+            
         # Save geometry as initial guess for next iterations
         if update_guess:
             new_guess = None
