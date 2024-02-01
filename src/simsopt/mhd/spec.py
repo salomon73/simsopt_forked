@@ -1090,7 +1090,7 @@ class Spec(Optimizable):
                 traceback.print_exc()
             raise ObjectiveFailure("SPEC did not run successfully.")
         if self.mpi.proc0_groups:
-            logger.info(f"Group {self.mpi.group}: SPEC run complete.")
+            logger.info(f"{filename}: SPEC run complete.")
         # Barrier so workers do not try to read the .h5 file before it
         # is finished:
         self.mpi.comm_groups.Barrier()
