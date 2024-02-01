@@ -1113,7 +1113,7 @@ class Spec(Optimizable):
         if self.results.output.ForceErr > self.tolerance:
             # re-set the boundary field guess before failing, so the next run does not start unconverged. 
             if self.freebound:
-                logger.info(f"Group {self.mpi.group}: Force balance unconverged, re-setting boundary field guess and raising ObjectiveFailure")
+                logger.info(f"run {filename}: Force balance unconverged, re-setting boundary field guess and raising ObjectiveFailure")
                 si.bns, si.bnc = initial_bns, initial_bnc
             raise ObjectiveFailure(
                 'SPEC could not find force balance'
@@ -1124,7 +1124,7 @@ class Spec(Optimizable):
             try: 
                 if self.results.output.BnsErr > self.inputlist.gbntol:
                     if self.mpi.proc0_groups:
-                        logger.info(f"Group {self.mpi.group}: Picard iteration unconverged, re-setting boundary field guess and raising ObjectiveFailure")
+                        logger.info(f"run {filename}: Picard iteration unconverged, re-setting boundary field guess and raising ObjectiveFailure")
                     si.bns, si.bnc = initial_bns, initial_bnc
                     raise ObjectiveFailure(
                         'Picard iteration failed to reach convergence, increase mfreeits or gbntol'
@@ -1179,6 +1179,8 @@ class Spec(Optimizable):
                     self.counter > 0) and (not self.keep_all_files):
                 self.files_to_delete.append(filename + '.sp.h5')
                 self.files_to_delete.append(filename + '.sp.end')
+        if self.mpi.proc0_groups:
+            logger.info(f"file {filename} completed run sucessfully")
 
     def volume(self):
         """
