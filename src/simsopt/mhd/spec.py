@@ -905,7 +905,8 @@ class Spec(Optimizable):
 
         # if freeboundary, store plasma-caused boundary field to re-set if run does not converge
         if self.freebound:
-            (initial_bns, initial_bnc) = (si.bns, si.bnc)
+            initial_bns = np.copy(si.bns)
+            initial_bnc = np.copy(si.bnc)
 
         # Check that number of volumes in internal memory is consistent with
         # the input file
