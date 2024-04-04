@@ -508,18 +508,24 @@ class CoilNormalField(NormalField):
         # Set coilset and boundary: if not given create standard ones. 
         if coilset is not None:
             self._coilset = coilset
-            self.computational_boundary = coilset.surface
         else:  
             from simsopt.field import CoilSet
             surface = SurfaceRZFourier()
             self._coilset = CoilSet.for_surface(surface)
-            self.computational_boundary = self._coilset.surface
 
         self.nfp = self.computational_boundary.nfp
         self.stellsym = self.computational_boundary.stellsym
         self.mpol = self.computational_boundary.mpol
         self.ntor = self.computational_boundary.ntor   
         Optimizable.__init__(self, depends_on=[self._coilset])  # call the Optimizable constructor, skip the NormalField constructor
+
+    @property
+    def computational_boundary(self): 
+        return self._coilset.surface
+    
+    @computational_boundary.setter
+    def computational_boundary(self, boundary):
+        self._coilset.surface = boundary
 
     @classmethod
     def from_spec_object(cls, spec, coils_per_period=6, optimize_coils=False, TARGET_LENGTH=1000):
@@ -694,7 +700,7 @@ class CoilNormalField(NormalField):
         BdotN_unnormalized = self.computational_boundary.inverse_fourier_transform_field(targetvns, targetvnc, normalization=(2*np.pi)**2, stellsym=self.stellsym)
         target = -1 * BdotN_unnormalized / np.linalg.norm(self.computational_boundary.normal(), axis=-1)
         JF = self.coilset.flux_penalty(target=target)\
-            + self.coilset.length_penalty(TOTAL_LENGTH=TARGET_LENGTH)
+            + self.coilset.length_penalty(TOTAL_LENGTH=TARGET_LENGTH, f='max')
         
         def fun(dofs):
             JF.x = dofs

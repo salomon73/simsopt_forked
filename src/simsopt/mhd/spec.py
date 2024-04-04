@@ -390,6 +390,8 @@ class Spec(Optimizable):
             raise ValueError('Input should be a NormalField or CoilNormalField')
         if self._normal_field is not normal_field:
             self.remove_parent(self._normal_field)
+            if self._computational_boundary is not normal_field.computational_boundary:
+                normal_field.computational_boundary = self._computational_boundary
             self._normal_field = normal_field
             self.append_parent(normal_field)
             return
@@ -888,6 +890,11 @@ class Spec(Optimizable):
     def run(self, update_guess: bool = True):
         """
         Run SPEC, if needed.
+        The FORTRAN state has been created in the __init__ method (there can be only one for one python kernel), and the values in the FORTRAN memory are updated by python. 
+
+        The most important values are in inputlist and allglobal. 
+
+        Note: Since all calls to fortran memory access the same memory, there is no difference between spec.inputlist and self.inputlist (or even my_other_spec2.inputlist).
 
         Args:
             - update_guess: boolean. If True, initial guess will be updated with
