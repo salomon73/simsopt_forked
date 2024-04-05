@@ -25,7 +25,6 @@ import os
 from pathlib import Path
 import numpy as np
 from scipy.optimize import minimize
-
 from simsopt.field import BiotSavart, Current, coils_via_symmetries
 from simsopt.geo import (SurfaceRZFourier, curves_to_vtk, create_equally_spaced_curves,
                          CurveLength, CurveCurveDistance, MeanSquaredCurvature,
@@ -167,7 +166,7 @@ print("""
 ################################################################################
 """)
 res = minimize(fun, dofs, jac=True, method='L-BFGS-B', options={'maxiter': MAXITER, 'maxcor': 300}, tol=1e-15)
-curves_to_vtk(curves, OUT_DIR + f"curves_opt_short")
+curves_to_vtk(curves, OUT_DIR + "curves_opt_short")
 pointData = {"B_N": np.sum(bs.B().reshape((nphi, ntheta, 3)) * s.unitnormal(), axis=2)[:, :, None]}
 s.to_vtk(OUT_DIR + "surf_opt_short", extra_data=pointData)
 
@@ -178,7 +177,7 @@ s.to_vtk(OUT_DIR + "surf_opt_short", extra_data=pointData)
 dofs = res.x
 LENGTH_WEIGHT *= 0.1
 res = minimize(fun, dofs, jac=True, method='L-BFGS-B', options={'maxiter': MAXITER, 'maxcor': 300}, tol=1e-15)
-curves_to_vtk(curves, OUT_DIR + f"curves_opt_long")
+curves_to_vtk(curves, OUT_DIR + "curves_opt_long")
 pointData = {"B_N": np.sum(bs.B().reshape((nphi, ntheta, 3)) * s.unitnormal(), axis=2)[:, :, None]}
 s.to_vtk(OUT_DIR + "surf_opt_long", extra_data=pointData)
 
