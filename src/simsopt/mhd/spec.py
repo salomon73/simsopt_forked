@@ -1176,7 +1176,8 @@ class Spec(Optimizable):
             if (not self.keep_all_files) and (self.mpi.group > 0):
                 os.remove(filename + '.sp.h5')
                 os.remove(filename + '.sp.end')
-                os.remove('.' + filename + '.sp.DF')
+                if os.path.exists('.' + filename + '.sp.DF'):
+                    os.remove('.' + filename + '.sp.DF')
 
             # Delete the previous output file, if desired:
             for file_to_delete in self.files_to_delete:

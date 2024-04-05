@@ -804,10 +804,10 @@ class ReducedCoilSet(CoilSet):
     @surface.setter
     def surface(self, *args, **kwargs):
         """
-        settiing a new surface requires re-calculating
+        setting a new surface requires re-calculating
         the SVD matrices. 
         """
-        raise ValueError("Not supported yet")
+        raise ValueError("Setting a new surface for a ReducedCoilSet is not supported yet.")
     
     def get_dof_orders(self):
         """
@@ -823,9 +823,8 @@ class ReducedCoilSet(CoilSet):
         #check if correct!
         if len(x) != self.nsv:
             raise ValueError("Wrong number of DOFs")
-        padx = np.pad(x, (0, len(self._coil_x0)-self.nsv), mode='constant', constant_values=0)
-        #pads = np.pad(self._s_diag[:self.nsv], (0, len(self._coil_x0) - self.nsv), mode='constant', constant_values=0)
-        self.coilset.x = self._coil_x0 + (padx) @ self._vh_matrix  # multiply x by singular value so that low singular values have less effect. [could also put in trust region... is this best? or divide by?]
+        padx = np.pad(x, (0, len(self._coil_x0)-self.nsv), mode='constant', constant_values=0)  # create zero-padded vector of length of coil DOFs. 
+        self.coilset.x = self._coil_x0 + (padx) @ self._vh_matrix  # translate reduced vectors amplitude to movement of coils.
 
     def plot_singular_vector(self, n, eps=1e-4, show_delta_B=True, engine='mayavi', show=False, **kwargs):
         """
