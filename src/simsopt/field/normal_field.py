@@ -21,7 +21,8 @@ class NormalField(Optimizable):
     ``NormalField`` represents the magnetic field normal to a toroidal surface, for example the
     computational boundary of SPEC free-boundary.
 
-    It consists a surface (the computational boundary), and a set of Fourier harmonics that. 
+    It consists a surface (the computational boundary), and a set of Fourier harmonics that describe
+    the normal component of an externally provided field. 
 
     The Fourier harmonics are the degees of freedom, the computational boundary is kept fixed. 
     The normal field should not be normalized to unit area, i.e. it is the 
