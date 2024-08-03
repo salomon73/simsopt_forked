@@ -10,7 +10,7 @@ from ..field.selffield import self_ind_accurate, mutual_inductance, self_ind
 import simsoptpp as sopp
 from scipy import constants
 
-
+__all__ = ['Energy', 'CoilEnergy' ]
 # This function is not jitted due to slow compilation times from the two levels of forloop
 def energy_pure(array_gamma, array_gammadash, array_current, array_quadpoints, regularization):
     r"""

@@ -5,7 +5,7 @@ import scipy
 from .._core.optimizable import Optimizable
 from .._core.derivative import Derivative, derivative_dec
 
-__all__ = ['MPIOptimizable', 'MPIObjective', 'QuadraticPenalty', 'Weight', 'forward_backward']
+__all__ = ['MPIOptimizable', 'MPIObjective', 'QuadraticPenalty', 'SquaredRootPenalty','Weight', 'forward_backward']
 
 
 def forward_backward(P, L, U, rhs, iterative_refinement=False):
@@ -192,6 +192,35 @@ class QuadraticPenalty(Optimizable):
 
     return_fn_map = {'J': J, 'dJ': dJ}
 
+class SquaredRootPenalty(Optimizable):
+
+    def __init__(self, obj, cons=0.):
+        r"""
+        
+        Args:
+            obj: the underlying objective. It should provide a ``.J()`` and ``.dJ()`` function.
+
+        """
+        Optimizable.__init__(self, x0=np.asarray([]), depends_on=[obj])
+        self.obj = obj
+        self.cons = cons
+
+    def J(self):
+        val = self.obj.J()
+        diff = float(val - self.cons)
+        return 2*np.sqrt(diff)
+
+
+    @derivative_dec
+    def dJ(self):
+        val = self.obj.J()
+        dval = self.obj.dJ(partials=True)
+        diff = float(val - self.cons)
+
+        return 1/np.sqrt(diff)*dval
+
+
+    return_fn_map = {'J': J, 'dJ': dJ}
 
 class Weight(object):
 
