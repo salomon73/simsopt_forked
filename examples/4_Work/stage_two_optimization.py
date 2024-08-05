@@ -52,7 +52,7 @@ order = 5
 # without having to rebuild the objective.
 FLUX_WEIGHT = Weight(1)
 LENGTH_WEIGHT = Weight(1e-5)  #1e-5 id, 8e-7 quadratic, 3.5e-5 squaredroot
-ENERGY_WEIGHT   = Weight(0)    #1e-8 #1e-10
+ENERGY_WEIGHT   = Weight(1e-10)    #1e-8 #1e-10
 
 # Threshold and weight for the coil-to-coil distance penalty in the objective function:
 CC_THRESHOLD = 0.1
@@ -125,8 +125,8 @@ for i in range(ncoils):
 # fact that Optimizable objects with J() and dJ() functions can be
 # multiplied by scalars and added:
 JF = FLUX_WEIGHT* Jf \
-    + LENGTH_WEIGHT * sum(Jls)
-    #+ ENERGY_WEIGHT * sum(QuadraticPenalty(Jenergy[i]) for i in range(ncoils))
+    + LENGTH_WEIGHT * sum(Jls) \
+    + ENERGY_WEIGHT * sum(QuadraticPenalty(Jenergy[i]) for i in range(ncoils))
     #+ CC_WEIGHT * Jccdist \
     #+ CS_WEIGHT * Jcsdist \
     #+ CURVATURE_WEIGHT * sum(Jcs) \
