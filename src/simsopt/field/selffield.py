@@ -6,6 +6,7 @@ method from Hurwitz, Landreman, & Antonsen, arXiv (2023).
 import math
 from scipy import constants
 import numpy as np
+from jax import vmap
 import jax.numpy as jnp
 import jax.scipy as jsp
 from jax import grad
@@ -199,11 +200,12 @@ def mutual_inductance(gamma_1, gammadash_1, gamma_2, gammadash_2):
     integrand = jnp.zeros(n_quad_1)
     for i in range(n_quad_1):
         integrand = integrand.at[i].set( 
-                    jsp.integrate.trapezoid(jnp.dot( rc_prime2, rc_prime1[i])/(jnp.linalg.norm(r_c1 - r_c2[i])), dx=dphi_1)
+                    jsp.integrate.trapezoid(jnp.dot( rc_prime2, rc_prime1[i])/(jnp.linalg.norm(r_c1 - r_c2[i], axis=1)), dx=dphi_1)
                     )
     double_integral = double_integral.at[0].set( jsp.integrate.trapezoid(integrand, dx=dphi_2) )
     
     return Biot_savart_prefactor * double_integral
+
 
 @jit
 def self_ind(gamma, gammadash, quadpoints, regularization):
@@ -220,12 +222,60 @@ def self_ind(gamma, gammadash, quadpoints, regularization):
 
     for i in range(n_quad):
         integrand = integrand.at[i].set( 
-                    jsp.integrate.trapezoid( jnp.dot(rc_prime, rc_prime[i]) / ( jnp.sqrt(jnp.linalg.norm(r_c - r_c[i])**2 + regularization))    
+                    jsp.integrate.trapezoid( jnp.dot(rc_prime, rc_prime[i]) / ( jnp.sqrt(jnp.linalg.norm(r_c - r_c[i], axis=1)**2 + regularization))    
                                      ,dx = dphi) 
                                      ) 
     double_integral = double_integral.at[0].set(jsp.integrate.trapezoid(integrand, dx=dphi))
     return Biot_savart_prefactor * double_integral
 
+
+# VECTORIZED METHODS
+@jit
+def self_ind_vec(gamma, gammadash, quadpoints, regularization):
+    """
+    Self inductance of a coil carrying a current, optimized version.
+    """
+    phi = quadpoints * 2 * jnp.pi
+    r_c = gamma
+    rc_prime = gammadash / jnp.pi
+    dphi = 2 * jnp.pi / len(phi)
+    
+    distance_matrix = jnp.sqrt(jnp.sum((r_c[:, None, :] - r_c[None, :, :]) ** 2, axis=-1) + regularization)
+    integrand_matrix = jnp.dot(rc_prime, rc_prime.T) / distance_matrix
+    
+    # Perform the double integral using vectorized operations
+    integral = jnp.sum(integrand_matrix * dphi, axis=1)
+    double_integral = jnp.sum(integral * dphi)
+    
+    return Biot_savart_prefactor * double_integral
+
+@jit
+def mutual_inductance_vec(gamma_1, gammadash_1, gamma_2, gammadash_2):
+    """
+    Mutual inductance of two coils carrying a current, vectorized version.
+    """
+    r_c1 = gamma_1
+    r_c2 = gamma_2
+    rc_prime1 = gammadash_1 / jnp.pi
+    rc_prime2 = gammadash_2 / jnp.pi
+    dphi_1 = 2 * jnp.pi / r_c1.shape[0]
+    dphi_2 = 2 * jnp.pi / r_c2.shape[0]
+    
+    # Compute the integrand in the form of a matrix
+    distance_matrix = jnp.sqrt(jnp.sum((r_c1[:, None, :] - r_c2[None, :, :]) ** 2, axis=-1))
+    integrand_matrix = jnp.dot(rc_prime2, rc_prime1.T) / distance_matrix
+    
+    # Perform the double integration
+    integral = jnp.sum(integrand_matrix * dphi_1, axis=1)
+    double_integral = jnp.sum(integral * dphi_2)
+    
+    return Biot_savart_prefactor * double_integral
+
+
+
+
+
+#####################################################################################
 @jit
 def self_ind_accurate(gamma, gammadash, quadpoints, regularization):
     r"""
@@ -234,7 +284,7 @@ def self_ind_accurate(gamma, gammadash, quadpoints, regularization):
     """
     phi = quadpoints * 2 * jnp.pi
     r_c = gamma
-    rc_prime = gammadash / 2 / jnp.pi
+    rc_prime = gammadash / 2 / jnp.pi 
     n_quad = jnp.shape(phi)[0]
     dphi = 2 * jnp.pi / n_quad
     norm_rc_prime = jnp.linalg.norm(rc_prime, axis=1)
