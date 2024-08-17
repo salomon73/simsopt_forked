@@ -9,6 +9,7 @@ import numpy as np
 from jax import vmap
 import jax.numpy as jnp
 import jax.scipy as jsp
+import jax
 from jax import grad
 from .biotsavart import BiotSavart
 from .coil import Coil
@@ -230,16 +231,16 @@ def self_ind(gamma, gammadash, quadpoints, regularization):
 
 
 # VECTORIZED METHODS
-@jit
 def self_ind_vec(gamma, gammadash, quadpoints, regularization):
     """
     Self inductance of a coil carrying a current, optimized version.
     """
     phi = quadpoints * 2 * jnp.pi
-    r_c = gamma
-    rc_prime = gammadash / jnp.pi
     dphi = 2 * jnp.pi / len(phi)
-    
+    rc_prime = gammadash / jnp.pi
+    r_c = gamma
+
+    # Compute the integrand in the form of a matrix
     distance_matrix = jnp.sqrt(jnp.sum((r_c[:, None, :] - r_c[None, :, :]) ** 2, axis=-1) + regularization)
     integrand_matrix = jnp.dot(rc_prime, rc_prime.T) / distance_matrix
     
@@ -249,22 +250,23 @@ def self_ind_vec(gamma, gammadash, quadpoints, regularization):
     
     return Biot_savart_prefactor * double_integral
 
-@jit
+
 def mutual_inductance_vec(gamma_1, gammadash_1, gamma_2, gammadash_2):
     """
     Mutual inductance of two coils carrying a current, vectorized version.
     """
-    r_c1 = gamma_1
-    r_c2 = gamma_2
-    rc_prime1 = gammadash_1 / jnp.pi
-    rc_prime2 = gammadash_2 / jnp.pi
+    r_c1 = jnp.array(gamma_1)
+    r_c2 = jnp.array(gamma_2)
+    rc_prime1 = jnp.array(gammadash_1) / jnp.pi
+    rc_prime2 = jnp.array(gammadash_2) / jnp.pi
     dphi_1 = 2 * jnp.pi / r_c1.shape[0]
     dphi_2 = 2 * jnp.pi / r_c2.shape[0]
-    
+
     # Compute the integrand in the form of a matrix
     distance_matrix = jnp.sqrt(jnp.sum((r_c1[:, None, :] - r_c2[None, :, :]) ** 2, axis=-1))
     integrand_matrix = jnp.dot(rc_prime2, rc_prime1.T) / distance_matrix
-    
+
+
     # Perform the double integration
     integral = jnp.sum(integrand_matrix * dphi_1, axis=1)
     double_integral = jnp.sum(integral * dphi_2)
