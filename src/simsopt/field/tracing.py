@@ -858,7 +858,7 @@ class MaxZStoppingCriterion(sopp.MaxZStoppingCriterion):
     pass
 
 def plot_poincare_data(fieldlines_phi_hits, phis, filename, mark_lost=False, aspect='equal', dpi=300, xlims=None, 
-                       ylims=None, surf=None, s=2, marker='o'):
+                       ylims=None, surf=None, s=2, marker='o', *kwargs):
     """
     Create a poincare plot. Usage:
 
@@ -905,7 +905,7 @@ def plot_poincare_data(fieldlines_phi_hits, phis, filename, mark_lost=False, asp
             if data_this_phi.size == 0:
                 continue
             r = np.sqrt(data_this_phi[:, 2]**2+data_this_phi[:, 3]**2)
-            axs[row, col].scatter(r, data_this_phi[:, 4], marker=marker, s=s, linewidths=0, c=color)
+            axs[row, col].scatter(r, data_this_phi[:, 4], marker=marker, s=s, linewidths=0, c='k', *kwargs) #color
 
         plt.rc('axes', axisbelow=True)
         axs[row, col].grid(True, linewidth=0.5)
@@ -915,7 +915,7 @@ def plot_poincare_data(fieldlines_phi_hits, phis, filename, mark_lost=False, asp
             cross_section = surf.cross_section(phi=phis[i])
             r_interp = np.sqrt(cross_section[:, 0] ** 2 + cross_section[:, 1] ** 2)
             z_interp = cross_section[:, 2]
-            axs[row, col].plot(r_interp, z_interp, linewidth=1, c='k')
+            axs[row, col].plot(r_interp, z_interp, linewidth=1, c='r')
 
     plt.tight_layout()
     plt.savefig(filename, dpi=dpi)

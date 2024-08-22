@@ -235,8 +235,7 @@ def self_ind_vec(gamma, gammadash, quadpoints, regularization):
     """
     Self inductance of a coil carrying a current, optimized version.
     """
-    phi = quadpoints * 2 * jnp.pi
-    dphi = 2 * jnp.pi / len(phi)
+    dphi = 2 * jnp.pi / len(quadpoints)
     rc_prime = gammadash / jnp.pi
     r_c = gamma
 

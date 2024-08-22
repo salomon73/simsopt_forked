@@ -39,9 +39,6 @@ R1 = 0.5
 order = 8
 
 
-# Number of iterations to perform:
-MAXITER = 50 if in_github_actions else 800
-compute_forces = True
 # File for the desired boundary magnetic surface:
 TEST_DIR = (Path(__file__).parent / ".." / ".." / "tests" / "test_files").resolve()
 filename = TEST_DIR / 'input.LandremanPaul2021_QA'
@@ -50,9 +47,6 @@ filename = TEST_DIR / 'input.LandremanPaul2021_QA'
 OUT_DIR = "./output/"
 os.makedirs(OUT_DIR, exist_ok=True)
 
-#######################################################
-# End of input parameters.
-#######################################################
 
 # Initialize the boundary magnetic surface:
 nphi = 128
@@ -67,17 +61,9 @@ coils = coils_via_symmetries(base_curves, base_currents, s.nfp, True)
 bs = BiotSavart(coils)
 bs.set_points(s.gamma().reshape((-1, 3)))
 
-# Save initial coils and surface
-curves = [c.curve for c in coils]
-curves_to_vtk(curves, OUT_DIR + "curves_init")
-pointData = {"B_N": np.sum(bs.B().reshape((nphi, ntheta, 3)) * s.unitnormal(), axis=2)[:, :, None]}
-s.to_vtk(OUT_DIR + "surf_init", extra_data=pointData)
 
-
-Ja = [ArclengthVariation(c) for c in base_curves]
-Jls = [CurveLength(c) for c in base_curves]
-Jenergy = [ CoilEnergy(coils[i], [coils[j] for j in range(ncoils) if j>i ], regularization_rect(0.1, 0.1)) for i in range(ncoils)] 
-
+# Initialize the functional to test 
+Jenergy = [ CoilEnergy(coils[i], [coils[j] for j in range(ncoils) if j>i ], regularization_rect(0.1, 0.1)) for i in range(ncoils) ] 
 JF =  sum(Jenergy)
 
 # Wrapper function for scipy.minimize
@@ -87,32 +73,49 @@ def fun(dofs):
     grad = JF.dJ()
     return J, grad
 
+# Parameters for the Taylor test
+verbose = False
+n_tests=40
 
 print("""
 ################################################################################
-### Perform a Taylor test ######################################################
+################           PERFORMING A TAYLOR TEST            #################
 ################################################################################
 """)
+print("Average computed over")
+print(n_tests, " tests")
 f = fun
 dofs = JF.x
 
 np.random.seed(1)
-h = np.random.uniform(size=dofs.shape)
-J0, dJ0 = f(dofs)
-dJh = sum(dJ0 * h)
-eps_vec = np.logspace(-12,-3,40)
-err_vec = []
-for eps in np.flip(eps_vec):
-    J1, _ = f(dofs + eps*h)
-    J2, _ = f(dofs - eps*h)
-    print('diff ', (J1-J2)/(2*eps))
-    print('autodiff', dJh)
-    print('------------')
-    print("err", (J1-J2)/(2*eps) - dJh)
-    print("------------")
-    print('J1', J1)
-    print('J2', J2)
-    err_vec.append(np.abs((J1-J2)/(2*eps) - dJh)/np.abs(dJh))
+eps_vec = np.flip(np.logspace(-12,-3,40))
+err_vec = np.zeros((n_tests, 40))
+for i in range(n_tests):
+    h = np.random.uniform(size=dofs.shape)
+    J0, dJ0 = f(dofs)
+    dJh = sum(dJ0 * h)
+    for j in range(len(eps_vec)):
+        J1, _ = f(dofs + eps_vec[j]*h)
+        J2, _ = f(dofs - eps_vec[j]*h)
+        if verbose:
+            print('diff ', (J1-J2)/(2*eps_vec[j]))
+            print('autodiff', dJh)
+            print('------------')
+            print("err", (J1-J2)/(2*eps_vec[j]) - dJh)
+            print("------------")
+            print('J1', J1)
+            print('J2', J2)
+        err_vec[i,j]= np.abs((J1-J2)/(2*eps_vec[j]) - dJh)/np.abs(dJh)
+avg_err = np.sum(err_vec, axis=0)
 
-plt.loglog(eps_vec, err_vec)
+# Plot the Taylor test result
+plt.rcParams['text.usetex'] = True
+fig, ax = plt.subplots(figsize=(10,5), tight_layout=True)
+ax.tick_params(axis='y')
+ax.loglog(eps_vec, avg_err)
+ax.tick_params(axis='x', labelsize=13)
+ax.tick_params(axis='y', labelsize=13)
+ax.set_xlabel('$\epsilon$',fontsize=20)
+ax.set_ylabel(r'$\frac{|(J(\mathbf{x}+\epsilon\mathbf{h})-J(\mathbf{x}-\epsilon\mathbf{h}))|}{|2\epsilon dJ|}$', fontsize=20)
+plt.savefig('Taylortest.pdf', dpi=300)
 plt.show()
