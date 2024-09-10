@@ -90,26 +90,10 @@ class Energy(Optimizable):
 
 
 
-
 def coil_energy_pure(I, gamma, gammadash, quadpoints, array_g, array_gdash, array_current, regularization):
-    r"""
-    This function computes the energy contribution of a given coil:
-    self energy + mutual energies terms
-    """
-    E = jnp.zeros(1)
-    # self energy term
-    E += I**2 * self_ind(gamma, gammadash, quadpoints, regularization)
-    # mutual energy terms
-    for i in range(array_g.shape[0]): 
-        E += I*array_current[i] * mutual_inductance(gamma, gammadash, array_g[i,:,:], array_gdash[i,:,:])
-    return jnp.array(0.5 * E)[0]
-
-
-
-def coil_energy_pure_vec(I, gamma, gammadash, quadpoints, array_g, array_gdash, array_current, regularization):
     """
     Computes the energy contribution of a given coil: 
-    self-energy + mutual energies terms, optimized version.
+    self-energy + mutual energies terms, vectorized version.
     """
     self_energy =  I**2 * self_ind_vec(gamma, gammadash, quadpoints, regularization)
 
@@ -130,7 +114,7 @@ class CoilEnergy(Optimizable):
         self.regularization = regularization
 
         self.J_Jax = jit(lambda I, gamma, gammadash, quadpoints, array_g, array_gdash, array_current, regularization : \
-            coil_energy_pure_vec(I, gamma, gammadash, quadpoints, array_g, array_gdash, array_current, regularization))
+            coil_energy_pure(I, gamma, gammadash, quadpoints, array_g, array_gdash, array_current, regularization))
     
         # Gradients with respect to the considered coil for which it is intended to compute the energy
         self.thisgrad0 = jit(lambda I, gamma, gammadash, quadpoints, array_g, array_gdash, array_current, regularization : \
@@ -193,7 +177,7 @@ class CoilEnergy(Optimizable):
             + self.coil.curve.dgammadash_by_dcoeff_vjp(thisgrad2) \
             + self.coil.current.vjp(jnp.asarray([thisgrad0]))
 
-        # Gradients with respect to the DOFS of the external coil
+        # Gradients with respect to the DOFS of the external coils
         other_coils_grad = Derivative({})
         for i,c  in enumerate(self.other_coils):
             other_coils_grad += (
