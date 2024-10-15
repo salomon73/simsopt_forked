@@ -25,11 +25,11 @@ order = 6
 
 # Fixed Weights
 FLUX_WEIGHT = Weight(1)
-ARCLENGTH_WEIGHT = Weight(1e-4)
+ARCLENGTH_WEIGHT = Weight(1e-6)
 
 # Scan ranges for weights
-energy_weight_range = np.logspace(-13, -8, 100)  # Adjust the range as needed
-length_weight_range = [0] #np.logspace(-7, -5, 3)   # Adjust the range as needed
+energy_weight_range = np.logspace(-14, -10, 100)  # Adjust the range as needed
+length_weight_range = [1e-6] #np.logspace(-7, -5, 3)   # Adjust the range as needed
 
 # Number of iterations
 MAXITER = 50 if in_github_actions else 800
@@ -82,7 +82,7 @@ for ew in energy_weight_range:
 
         # Initialize the coils
         base_curves = create_equally_spaced_curves(ncoils, s.nfp, stellsym=True, R0=R0, R1=R1, order=order)
-        base_currents = [Current(1e4) for _ in range(ncoils)]
+        base_currents = [Current(1e5) for _ in range(ncoils)]
         base_currents[0].fix_all()
         coils = coils_via_symmetries(base_curves, base_currents, s.nfp, True)
         bs = BiotSavart(coils)
@@ -102,7 +102,7 @@ for ew in energy_weight_range:
 
         JF = FLUX_WEIGHT * Jf \
             + ARCLENGTH_WEIGHT * sum(Ja) \
-            + LENGTH_WEIGHT * sum(Jls) \
+            + LENGTH_WEIGHT * QuadraticPenalty(sum(Jls), 20, "max") \
             + ENERGY_WEIGHT * sum(Jenergy) 
 
         # Run optimization 

@@ -82,7 +82,7 @@ for ew in energy_weight_range:
 
         # Initialize the coils
         base_curves = create_equally_spaced_curves(ncoils, s.nfp, stellsym=True, R0=R0, R1=R1, order=order)
-        base_currents = [Current(1e4) for _ in range(ncoils)]
+        base_currents = [Current(1e5) for _ in range(ncoils)]
         base_currents[0].fix_all()
         coils = coils_via_symmetries(base_curves, base_currents, s.nfp, True)
         bs = BiotSavart(coils)

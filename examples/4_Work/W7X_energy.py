@@ -55,6 +55,7 @@ s.to_vtk(OUT_DIR + "W7X_surf_init", extra_data=pointData)
 
 
 print("Coils' currents: "+ f"{[current.get_value()*1e-6 for current in currents]}"+ "MA")
-Jenergy = [ CoilEnergy(coils[i], [coils[j] for j in range(ncoils) if j>i ], regularization_rect(0.015, 0.015)) for i in range(ncoils)] 
-print("Total energy stored in W7X coils: " + f"{sum(Je.J()*1e-6/np.e/np.e for Je in Jenergy):2e}" + " MJ")    
+
+Jenergy = [ CoilEnergy(coils[i], [coils[j] for j in range(ncoils) if j>i ], regularization_rect(0.166, 0.166)) for i in range(ncoils)] 
+print("Total energy stored in W7X coils: " + f"{sum(Je.J()*1e-6/np.e for Je in Jenergy):2e}" + " MJ")    
 curves_to_vtk(curves, OUT_DIR + f"W7X_curves_w_forces", extra_data=pointData_forces(coils))

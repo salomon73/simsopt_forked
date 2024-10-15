@@ -40,14 +40,13 @@ R1 = 0.5
 order = 6
 
 # Regularization parameters
-dim = 0.015
-regularization = regularization_rect(dim,dim)
+regularization = regularization_rect(0.015,0.015)
 
 # Weights
 FLUX_WEIGHT = Weight(1)
-LENGTH_WEIGHT = Weight(4e-5) # wl 4e-5 we = 1e-11 
-ENERGY_WEIGHT   = Weight(0.0)  #1e-11
-ARCLENGTH_WEIGHT = Weight(0.0) # 1e-6
+LENGTH_WEIGHT = Weight(0.0) 
+ENERGY_WEIGHT   = Weight(1e-11)  
+ARCLENGTH_WEIGHT = Weight(1e-6)
 CC_WEIGHT = Weight(0.0)
 CS_WEIGHT = Weight(0.0)
 LINK_WEIGHT = Weight(0.0)
@@ -86,7 +85,7 @@ os.makedirs(OUT_DIR, exist_ok=True)
 # Initialize the boundary magnetic surface:
 nphi = 128 #128
 ntheta = 64 #64
-s = SurfaceRZFourier.from_vmec_input(filename, range="half period", nphi=nphi, ntheta=ntheta)
+s = SurfaceRZFourier.from_vmec_input(filename, range="", nphi=nphi, ntheta=ntheta)
 nfp = s.nfp
 
 # Initialize the coils:
@@ -181,7 +180,7 @@ if run_opt:
     f = fun
     dofs = JF.x
     res = minimize(fun, dofs, jac=True, method='L-BFGS-B', options={'maxiter': MAXITER, 'maxcor': 300, 'disp': False}, tol=1e-15)
-    curves_to_vtk(curves[0:ncoils], OUT_DIR + "curves_opt_short_ew=" + f"{ENERGY_WEIGHT.value}", close=True, extra_data=pointData_forces(coils))
+    curves_to_vtk(curves, OUT_DIR + "curves_opt_short_ew=" + f"{ENERGY_WEIGHT.value}", close=True, extra_data=pointData_forces(coils))
     pointData = {"B_N/B": np.sum(bs.B().reshape((nphi, ntheta, 3)) * s.unitnormal(), axis=2)[:, :, None]/ np.linalg.norm(bs.B().reshape((nphi, ntheta, 3)), axis=2)[:, :, None], \
                  "B_N": np.sum(bs.B().reshape((nphi, ntheta, 3)) * s.unitnormal(), axis=2)[:, :, None]}
     s.to_vtk(OUT_DIR + "surf_opt_short_ew=" + f"{ENERGY_WEIGHT.value}", extra_data=pointData)
