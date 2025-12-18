@@ -26,7 +26,7 @@ from simsopt.field import (InterpolatedField, SurfaceClassifier, LevelsetStoppin
 from simsopt.geo import (SurfaceRZFourier, curves_to_vtk, create_equally_spaced_curves,
                          CurveLength, MeanSquaredCurvature,ArclengthVariation, CurveCurveDistance, MeanSquaredCurvature,
                          LpCurveCurvature, CurveSurfaceDistance, LinkingNumber)
-from simsopt.objectives import Weight, SquaredFlux, QuadraticPenalty, SquaredRootPenalty
+from simsopt.objectives import Weight, SquaredFlux, QuadraticPenalty
 from simsopt.util import in_github_actions
 from simsopt.geo.energy import CoilEnergy, SelfEnergy, MutualEnergy
 from simsopt.field.force import coil_force_pure, coil_force 
