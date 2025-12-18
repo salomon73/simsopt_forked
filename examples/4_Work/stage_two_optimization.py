@@ -394,9 +394,9 @@ regularization = regularization_rect(dim,dim)
 # Weights
 FLUX_WEIGHT = Weight(10)
 LENGTH_WEIGHT = Weight(0.0) # wl 4e-5 we = 1e-11 
-ENERGY_WEIGHT   = Weight(1e-11)  #1e-11
-WEIGHT_SELF = Weight(0.0)
-WEIGHT_MUTUAL = Weight(0.0)
+ENERGY_WEIGHT   = Weight(0.0)  #1e-11
+WEIGHT_SELF = Weight(1e-11)
+WEIGHT_MUTUAL = Weight(1e-11)
 
 ARCLENGTH_WEIGHT = Weight(1e-6) # 1e-6
 CC_WEIGHT = Weight(0)

@@ -8,7 +8,7 @@ from simsopt.field import (InterpolatedField, SurfaceClassifier, LevelsetStoppin
                             particles_to_vtk, compute_fieldlines, plot_poincare_data, coils_via_symmetries)
 from simsopt.geo import (SurfaceRZFourier, curves_to_vtk, create_equally_spaced_curves,
                          CurveLength, MeanSquaredCurvature,ArclengthVariation)
-from simsopt.objectives import Weight, SquaredFlux, QuadraticPenalty, SquaredRootPenalty
+from simsopt.objectives import Weight, SquaredFlux, QuadraticPenalty
 from simsopt.util import in_github_actions
 from simsopt.geo.energy import CoilEnergy
 from simsopt.field.force import coil_force_pure, coil_force 
