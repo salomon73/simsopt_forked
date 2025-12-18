@@ -17,6 +17,26 @@ from ..geo.jit import jit
 from .._core.optimizable import Optimizable
 from .._core.derivative import derivative_dec
 
+__all__ = [
+    # Regularized Biot–Savart fields
+    "B_regularized_pure",
+    "B_regularized",
+    "B_regularized_circ",
+    "B_regularized_rect",
+
+    # Regularization models
+    "regularization_circ",
+    "regularization_rect",
+
+    # Inductance calculations (used in energy / forces)
+    "self_ind",
+    "self_ind_vec",
+    "self_ind_accurate",
+    "mutual_inductance",
+    "mutual_inductance_vec",
+]
+
+
 Biot_savart_prefactor = constants.mu_0 / (4 * np.pi)
 
 
