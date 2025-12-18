@@ -847,7 +847,6 @@ def curves_to_vtk(curves, filename, close=False, extra_data=None):
 
     polyLinesToVTK(str(filename), x, y, z, pointsPerLine=ppl, pointData=pointData)
 
-
 def create_equally_spaced_curves(ncurves, nfp, stellsym, R0=1.0, R1=0.5, order=6, numquadpoints=None):
     """
     Create ``ncurves`` curves of type
@@ -866,7 +865,7 @@ def create_equally_spaced_curves(ncurves, nfp, stellsym, R0=1.0, R1=0.5, order=6
         coils = coils_via_symmetries(base_curves, base_currents, 3, stellsym=True)
     """
     if numquadpoints is None:
-        numquadpoints = 15 * order
+        numquadpoints = 20 * order # before: 15 * order
     curves = []
     from simsopt.geo.curvexyzfourier import CurveXYZFourier
     for i in range(ncurves):
@@ -895,7 +894,7 @@ def create_equally_spaced_planar_curves(ncurves, nfp, stellsym, R0=1.0, R1=0.5, 
     """
 
     if numquadpoints is None:
-        numquadpoints = 15 * order
+        numquadpoints = 25 * order
     curves = []
     from simsopt.geo.curveplanarfourier import CurvePlanarFourier
     for k in range(ncurves):

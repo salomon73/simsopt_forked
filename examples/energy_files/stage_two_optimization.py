@@ -27,7 +27,7 @@ from simsopt.geo import (SurfaceRZFourier, curves_to_vtk, create_equally_spaced_
                          LpCurveCurvature, CurveSurfaceDistance, LinkingNumber)
 from simsopt.objectives import Weight, SquaredFlux, QuadraticPenalty, SquaredRootPenalty
 from simsopt.util import in_github_actions
-from simsopt.geo.energy import CoilEnergy, Energy
+from simsopt.geo.energy import CoilEnergy
 from simsopt.field.force import coil_force_pure, coil_force 
 from simsopt.field.selffield import B_regularized_pure, regularization_circ, regularization_rect
 from simsopt.util import in_github_actions, comm_world, proc0_print
@@ -44,9 +44,9 @@ regularization = regularization_rect(0.015,0.015)
 
 # Weights
 FLUX_WEIGHT = Weight(1)
-LENGTH_WEIGHT = Weight(0.0) 
-ENERGY_WEIGHT   = Weight(1e-11)  
-ARCLENGTH_WEIGHT = Weight(1e-6)
+LENGTH_WEIGHT = Weight(5e-4) 
+ENERGY_WEIGHT   = Weight(0.0) #1e-11 
+ARCLENGTH_WEIGHT = Weight(0.0) #1e-6
 CC_WEIGHT = Weight(0.0)
 CS_WEIGHT = Weight(0.0)
 LINK_WEIGHT = Weight(0.0)
@@ -62,7 +62,7 @@ MSC_THRESHOLD = 5
 CL_THRESHOLD  = 18.1
 
 # Number of iterations to perform:
-MAXITER = 50 if in_github_actions else 800
+MAXITER = 50 if in_github_actions else 2000
 
 # Bools 
 run_opt = True
@@ -85,7 +85,7 @@ os.makedirs(OUT_DIR, exist_ok=True)
 # Initialize the boundary magnetic surface:
 nphi = 128 #128
 ntheta = 64 #64
-s = SurfaceRZFourier.from_vmec_input(filename, range="", nphi=nphi, ntheta=ntheta)
+s = SurfaceRZFourier.from_vmec_input(filename, range="half period", nphi=nphi, ntheta=ntheta)
 nfp = s.nfp
 
 # Initialize the coils:
@@ -179,7 +179,7 @@ if run_opt:
     """)
     f = fun
     dofs = JF.x
-    res = minimize(fun, dofs, jac=True, method='L-BFGS-B', options={'maxiter': MAXITER, 'maxcor': 300, 'disp': False}, tol=1e-15)
+    res = minimize(fun, dofs, jac=True, method='L-BFGS-B', options={'maxiter': MAXITER, 'maxcor': 300, 'disp': True, 'factr':1}, tol=1e-15)
     curves_to_vtk(curves, OUT_DIR + "curves_opt_short_ew=" + f"{ENERGY_WEIGHT.value}", close=True, extra_data=pointData_forces(coils))
     pointData = {"B_N/B": np.sum(bs.B().reshape((nphi, ntheta, 3)) * s.unitnormal(), axis=2)[:, :, None]/ np.linalg.norm(bs.B().reshape((nphi, ntheta, 3)), axis=2)[:, :, None], \
                  "B_N": np.sum(bs.B().reshape((nphi, ntheta, 3)) * s.unitnormal(), axis=2)[:, :, None]}

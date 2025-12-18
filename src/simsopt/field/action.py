@@ -11,10 +11,12 @@ def action_pure(gamma, gammadash,  bs):
     return 1 # jnp.mean(jnp.dot(bs.A().reshape(-1,3), incremental_arclength_pure(gammadash)))
 
 class MagneticAction(Optimizable):
-    def __init__(self, curve, bs):
-        self.curve = curve
-        self.gamma = curve.gamma()
-        self.gammadash = curve.gammadash()
+    def __init__(self, gamma, gammadash, bs):
+        #self.curve = curve
+        #self.gamma = curve.gamma()
+        #self.gammadash = curve.gammadash()
+        self.gamma = gamma
+        self.gammadash = gammadash
         self.bs = bs
 
 
@@ -22,7 +24,7 @@ class MagneticAction(Optimizable):
         self.thisgrad0 = jit(lambda gamma, gammadash, bs: grad(self.J_Jax,argnums=0)(gamma, gammadash,  bs))
         self.thisgrad1 = jit(lambda gamma, gammadash, bs: grad(self.J_Jax,argnums=1)(gamma, gammadash,  bs))
 
-        super().__init__( depends_on = [curve])
+        super().__init__( depends_on = [])
 
     def J(self):
         return self.J_jax(self.gamma, self.gammadash, self.bs)

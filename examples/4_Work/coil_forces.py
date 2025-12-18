@@ -40,8 +40,8 @@ order = 6
 # Weight on the curve lengths in the objective function. We use the `Weight`
 # class here to later easily adjust the scalar value and rerun the optimization
 # without having to rebuild the objective.
-LENGTH_WEIGHT = Weight(1e-3) #1e-3
-LENGTH_TARGET = 16.5
+LENGTH_WEIGHT = Weight(1e-4) #1e-3
+LENGTH_TARGET = 18.1 #16.5
 ARCLENGTH_WEIGHT = Weight(1e-6)
 
 # Threshold and weight for the coil-to-coil distance penalty in the objective function:
@@ -50,18 +50,18 @@ CC_WEIGHT = 1000
 
 # Threshold and weight for the coil-to-surface distance penalty in the objective function:
 CS_THRESHOLD = 0.3
-CS_WEIGHT = 10
+CS_WEIGHT = Weight(10)
 
 # Threshold and weight for the curvature penalty in the objective function:
 CURVATURE_THRESHOLD = 5.
-CURVATURE_WEIGHT = 1e-6
+CURVATURE_WEIGHT = Weight(1e-6)
 
 # Threshold and weight for the mean squared curvature penalty in the objective function:
 MSC_THRESHOLD = 5
-MSC_WEIGHT = 1e-6
+MSC_WEIGHT = Weight(1e-6)
 
 # Weight on the mean squared force penalty in the objective function
-FORCE_WEIGHT = Weight(1e-26) 
+FORCE_WEIGHT = Weight(1e-18) 
 ENERGY_WEIGHT   = Weight(0.0)   
 
 # Number of iterations to perform:
@@ -82,13 +82,13 @@ os.makedirs(OUT_DIR, exist_ok=True)
 
 # Initialize the boundary magnetic surface:
 nphi = 128  
-ntheta = 64
+ntheta = 128
 s = SurfaceRZFourier.from_vmec_input(filename, range="half period", nphi=nphi, ntheta=ntheta)
 
 # Create the initial coils:
 base_curves = create_equally_spaced_curves(ncoils, s.nfp, stellsym=True, R0=R0, R1=R1, order=order)
 base_currents = [Current(1e5) for _ in range(ncoils)]
-base_currents[0].fix_all()
+[base_currents[i].fix_all() for i in range(ncoils)]
 
 
 coils = coils_via_symmetries(base_curves, base_currents, s.nfp, True)
@@ -110,7 +110,7 @@ Jccdist = CurveCurveDistance(curves, CC_THRESHOLD, num_basecurves=ncoils)
 Jcsdist = CurveSurfaceDistance(curves, s, CS_THRESHOLD)
 Jcs = [LpCurveCurvature(c, 2, CURVATURE_THRESHOLD) for c in base_curves]
 Jmscs = [MeanSquaredCurvature(c) for c in base_curves]
-Jforce = [LpCurveForce(c, coils, regularization_rect(0.015, 0.015), p=4) for c in base_coils]
+Jforce = [LpCurveForce(c, coils, regularization_rect(0.015, 0.015), p=2) for c in base_coils]
 Jenergy = [ CoilEnergy(coils[i], [coils[j] for j in range(ncoils) if j>i], regularization_rect(0.015, 0.015)) for i in range(ncoils)] 
 Ja = [ArclengthVariation(c) for c in base_curves]
 
@@ -142,7 +142,7 @@ def fun(dofs):
 def pointData_forces(coils):
     forces = []
     for c in coils:
-        force = np.linalg.norm(coil_force(c, coils, regularization_circ(0.05)), axis=1)
+        force = np.linalg.norm(coil_force(c, coils, regularization_rect(0.015, 0.015)), axis=1)
         force = np.append(force, force[0])
         forces = np.concatenate([forces, force])
     point_data = {"F": forces}
@@ -153,15 +153,44 @@ dofs = JF.x
 print(f"Optimization with FORCE_WEIGHT={FORCE_WEIGHT.value}, LENGTH_WEIGHT={LENGTH_WEIGHT.value} and ENERGY_WEIGHT={ENERGY_WEIGHT.value}")
 # print("INITIAL OPTIMIZATION")
 res = minimize(fun, dofs, jac=True, method='L-BFGS-B', options={'maxiter': MAXITER, 'maxcor': 300}, tol=1e-15)
-curves_to_vtk(curves[0:ncoils], OUT_DIR + "curves_opt_short", close=True, extra_data=pointData_forces(coils))
+curves_to_vtk(curves[0:ncoils], OUT_DIR + "curves_opt_short_forces", close=True, extra_data=pointData_forces(coils))
 pointData_surf = {"B_N/B": np.sum(bs.B().reshape((nphi, ntheta, 3)) * s.unitnormal(), axis=2)[:, :, None]/ np.linalg.norm(bs.B().reshape((nphi, ntheta, 3)), axis=2)[:, :, None], \
                  "B_N": np.sum(bs.B().reshape((nphi, ntheta, 3)) * s.unitnormal(), axis=2)[:, :, None]}
-s.to_vtk(OUT_DIR + "surf_opt_short_ew=" + f"{ENERGY_WEIGHT.value}", extra_data=pointData_surf)
+s.to_vtk(OUT_DIR + "surf_opt_short_forces=" + f"{ENERGY_WEIGHT.value}", extra_data=pointData_surf)
+print("final coil characteristics")
+cl_string = ", ".join([f"{J.J():.1f}" for J in Jls])
+l_string = f", Len=sum([{cl_string}])={sum(J.J() for J in Jls):.1f}"
+print(l_string)
+# Print final coils information
+BdotN = np.mean(np.abs(np.sum(bs.B().reshape((nphi, ntheta, 3)) * s.unitnormal(), axis=2)))
+force = [np.max(np.linalg.norm(coil_force(c, coils, regularization_rect(0.015, 0.015)), axis=1)) for c in base_coils]
+outstr = f"⟨B·n⟩={BdotN:.1e}"
+cl_string = ", ".join([f"{J.J():.1f}" for J in Jls])
+kap_string = ", ".join(f"{np.max(c.kappa()):.1f}" for c in base_curves)
+msc_string = ", ".join(f"{J.J():.1f}" for J in Jmscs)
+jforce_string = ", ".join(f"{J.J():.2e}" for J in Jforce)
+force_string = ", ".join(f"{f:.2e}" for f in force)
+outstr += f", Len=sum([{cl_string}])={sum(J.J() for J in Jls):.1f}, ϰ=[{kap_string}], ∫ϰ²/L=[{msc_string}], Jforce=[{jforce_string}], force=[{force_string}]"
+outstr += f", C-C-Sep={Jccdist.shortest_distance():.2f}, C-S-Sep={Jcsdist.shortest_distance():.2f}"
+outstr += f", E = {sum(J.J() for J in Jenergy):1e}"
+print(outstr)
+
+f_int_max = np.zeros((2,ncoils))
+
+for i in range(ncoils):
+    f_int_max[0,i] = np.max(np.linalg.norm(coil_force(coils[i], coils, regularization_rect(0.015, 0.015)), axis=1))
+    arc_length = np.linalg.norm(coils[i].curve.gammadash(), axis=1)
+    f_int_max[1,i] = 1/CurveLength(coils[i].curve).J() * np.mean(np.linalg.norm(coil_force(coils[i], coils, regularization_rect(0.015, 0.015)), axis=1) * arc_length)
+
+print("Forces on the obtained coils")
+print(["coil " + f'{i+1}' for i in range(ncoils)])
+print('max force:' +f"{f_int_max[0,:]}")
+print('integrated force:' +f"{f_int_max[1,:]}")
 
 # We now use the result from the optimization as the initial guess for a
 # subsequent optimization with reduced penalty for the coil length. This will
 # result in slightly longer coils but smaller `B·n` on the surface.
-init_guess=True
+init_guess=False
 if init_guess:
 
 
@@ -186,7 +215,7 @@ if init_guess:
     grad = JF.dJ()
     jf = Jf.J()
     BdotN = np.mean(np.abs(np.sum(bs.B().reshape((nphi, ntheta, 3)) * s.unitnormal(), axis=2)))
-    force = [np.max(np.linalg.norm(coil_force(c, coils, regularization_circ(0.05)), axis=1)) for c in base_coils]
+    force = [np.max(np.linalg.norm(coil_force(c, coils, regularization_rect(0.015, 0.015)), axis=1)) for c in base_coils]
     outstr = f"J={J:.1e}, Jf={jf:.1e}, ⟨B·n⟩={BdotN:.1e}"
     cl_string = ", ".join([f"{J.J():.1f}" for J in Jls])
     kap_string = ", ".join(f"{np.max(c.kappa()):.1f}" for c in base_curves)

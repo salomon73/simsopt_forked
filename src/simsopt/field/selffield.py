@@ -190,8 +190,8 @@ def mutual_inductance(gamma_1, gammadash_1, gamma_2, gammadash_2):
     """
     r_c1 = gamma_1
     r_c2 = gamma_2
-    rc_prime1 = gammadash_1 / jnp.pi
-    rc_prime2 = gammadash_2 / jnp.pi
+    rc_prime1 = gammadash_1 / jnp.pi / 2 # added 1/2 here
+    rc_prime2 = gammadash_2 / jnp.pi / 2 # added 1/2 here
     n_quad_1 = gamma_1.shape[0]
     n_quad_2 = gamma_2.shape[0]
     dphi_1 = 2 * jnp.pi / n_quad_1
@@ -216,7 +216,7 @@ def self_ind(gamma, gammadash, quadpoints, regularization):
     double_integral = jnp.zeros(1)
     phi = quadpoints * 2 * jnp.pi
     r_c = gamma
-    rc_prime = gammadash / jnp.pi
+    rc_prime = gammadash / jnp.pi / 2 # added 1/2 here
     n_quad = jnp.shape(phi)[0]
     dphi = 2 * jnp.pi / n_quad
     integrand = jnp.zeros(n_quad) 
@@ -236,7 +236,7 @@ def self_ind_vec(gamma, gammadash, quadpoints, regularization):
     Self inductance of a coil carrying a current, optimized version.
     """
     dphi = 2 * jnp.pi / len(quadpoints)
-    rc_prime = gammadash / jnp.pi
+    rc_prime = gammadash / jnp.pi / 2 # added 1/2 here
     r_c = gamma
 
     # Compute the integrand in the form of a matrix
@@ -256,8 +256,8 @@ def mutual_inductance_vec(gamma_1, gammadash_1, gamma_2, gammadash_2):
     """
     r_c1 = jnp.array(gamma_1)
     r_c2 = jnp.array(gamma_2)
-    rc_prime1 = jnp.array(gammadash_1) / jnp.pi
-    rc_prime2 = jnp.array(gammadash_2) / jnp.pi
+    rc_prime1 = jnp.array(gammadash_1) / jnp.pi / 2 # added 1/2 here
+    rc_prime2 = jnp.array(gammadash_2) / jnp.pi / 2 # added 1/2 here
     dphi_1 = 2 * jnp.pi / r_c1.shape[0]
     dphi_2 = 2 * jnp.pi / r_c2.shape[0]
 
