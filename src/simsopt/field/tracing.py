@@ -25,7 +25,7 @@ __all__ = ['SurfaceClassifier', 'LevelsetStoppingCriterion',
            'trace_particles', 'trace_particles_boozer',
            'trace_particles_starting_on_curve',
            'trace_particles_starting_on_surface',
-           'particles_to_vtk', 'plot_poincare_data']
+           'particles_to_vtk', 'plot_poincare_data', 'plot_poincare_line']
 
 
 def compute_gc_radius(m, vperp, q, absb):
@@ -925,5 +925,70 @@ def plot_poincare_data(fieldlines_phi_hits, phis, filename, mark_lost=False, asp
             axs[row, col].plot(r_interp, z_interp, linewidth=1, c='k')
 
     plt.tight_layout()
+    plt.savefig(filename, dpi=dpi)
+    plt.close()
+
+def plot_poincare_line(fieldlines_phi_hits, phis, filename, mark_lost=False, aspect='equal', dpi=300, xlims=None, 
+                       ylims=None, surf=None, s=2, marker='o', *kwargs):
+    """
+    Create a poincare plot. Usage:
+
+    .. code-block::
+
+        phis = np.linspace(0, 2*np.pi/nfp, nphis, endpoint=False)
+        res_tys, res_phi_hits = compute_fieldlines(
+            bsh, R0, Z0, tmax=1000, phis=phis, stopping_criteria=[])
+        plot_poincare_data(res_phi_hits, phis, '/tmp/fieldlines.png')
+
+    Requires matplotlib to be installed.
+
+    """
+    import matplotlib.pyplot as plt
+    from matplotlib.gridspec import GridSpec
+    from math import ceil, sqrt
+    
+    nphis = len(phis)
+    # Define overall figure size and subplot layout
+    fig, axs = plt.subplots(1, nphis, figsize=(14, 4))  # 1 row, 3 columns
+    for ax in axs:
+        ax.set_aspect(aspect)  # Maintain consistent aspect ratio
+        ax.set_box_aspect(1)
+    fig.subplots_adjust(wspace=0.3)
+    color = None
+
+    for i in range(len(phis)):
+        col = i % nphis
+        #breakpoint()
+        if i != len(phis) - 1:
+            #breakpoint()
+            axs[col].set_title(f"$\\phi = {phis[i]/np.pi:.2f}$ ", loc='left', y=0.0)
+        else:
+            axs[col].set_title(f"$\\phi = {phis[i]/np.pi:.2f}$ ", loc='right', y=0.0)
+       
+        axs[col].set_xlabel("$R$", fontsize=16)
+        axs[col].set_ylabel("$Z$", fontsize=16)
+        if xlims is not None:
+            axs[col].set_xlim(xlims)
+        if ylims is not None:
+            axs[col].set_ylim(ylims)
+        for j in range(len(fieldlines_phi_hits)):
+            lost = fieldlines_phi_hits[j][-1, 1] < 0
+            if mark_lost:
+                color = 'r' if lost else 'g'
+            data_this_phi = fieldlines_phi_hits[j][np.where(fieldlines_phi_hits[j][:, 1] == i)[0], :]
+            if data_this_phi.size == 0:
+                continue
+            r = np.sqrt(data_this_phi[:, 2]**2+data_this_phi[:, 3]**2)
+            axs[col].scatter(r, data_this_phi[:, 4], marker=marker, s=s, linewidths=0, c='k', *kwargs) #color
+
+        plt.rc('axes', axisbelow=True)
+
+        # if passed a surface, plot the plasma surface outline
+        if surf is not None:
+            cross_section = surf.cross_section(phi=phis[i])
+            r_interp = np.sqrt(cross_section[:, 0] ** 2 + cross_section[:, 1] ** 2)
+            z_interp = cross_section[:, 2]
+            axs[col].plot(r_interp, z_interp, linewidth=1, c='r')
+
     plt.savefig(filename, dpi=dpi)
     plt.close()
