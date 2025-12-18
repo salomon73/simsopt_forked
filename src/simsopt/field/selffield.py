@@ -1,16 +1,23 @@
 """
 This module contains functions for computing the self-field of a coil using the
-methods from Hurwitz, Landreman, & Antonsen, arXiv:2310.09313 (2023) and
-Landreman, Hurwitz, & Antonsen, arXiv:2310.12087 (2023).
+method from Hurwitz, Landreman, & Antonsen, arXiv (2023).
 """
 
+import math
 from scipy import constants
 import numpy as np
+from jax import vmap
 import jax.numpy as jnp
+import jax.scipy as jsp
+import jax
+from jax import grad
+from .biotsavart import BiotSavart
+from .coil import Coil
+from ..geo.jit import jit
+from .._core.optimizable import Optimizable
+from .._core.derivative import derivative_dec
 
 Biot_savart_prefactor = constants.mu_0 / (4 * np.pi)
-
-__all__ = ['B_regularized_pure', 'regularization_rect']
 
 
 def rectangular_xsection_k(a, b):
@@ -95,3 +102,202 @@ def B_regularized_circ(coil, a):
 
 def B_regularized_rect(coil, a, b):
     return B_regularized(coil, regularization_rect(a, b))
+
+
+def G(x, y):
+    """Auxiliary function for the calculation of the internal field of a rectangular crosssction"""
+    return y * jnp.arctan(x/y) + x/2*jnp.log(1 + y**2 / x**2)
+
+
+def K(u, v, kappa_1, kappa_2, p, q, a, b):
+    """Auxiliary function for the calculation of the internal field of a rectangular crosssction"""
+    K = - 2 * u * v * (kappa_1 * q - kappa_2 * p) * jnp.log(a * u**2 / b + b * v**2 / a) + \
+        (kappa_2 * q - kappa_1 * p) * (a * u**2 / b + b * v**2 / a) * jnp.log(a * u**2 / b + b * v**2 / a) + \
+        4 * a * u**2 * kappa_2 * p / b * \
+        jnp.arctan(b * v / a * u) - 4 * b * v**2 * \
+        kappa_1 * q / a * jnp.arctan(a * u / b * v)
+
+
+def local_field(coil, rho, theta, a=0.05):
+    """Calculate the variation of the field on the cross section"""
+    I = coil._current.current
+    phi = coil.curve.quadpoints
+    N_phi = phi.shape[0]
+    _, n, b = coil.curve.frenet_frame()
+    kappa = coil.curve.kappa()
+    b_loc = jnp.zeros((N_phi, 3))
+
+    for i in range(N_phi):
+        b_loc[i] = 2*rho/a * (-n[i]*jnp.sin(theta) + b[i]*jnp.cos(theta)) + kappa[i] / 2 * (-rho**2 / 2 * jnp.sin(2*theta) * n[i] +
+                                                                                            (1.5-rho**2 + rho**2 / 2 * jnp.cos(2*theta)) * b[i])
+
+    b_loc *= constants.mu_0 * I / 4 / jnp.pi
+    return b_loc
+
+
+def local_field_rect(coil, u, v, a, b):
+    """Calculate the variation of the field on a rectangular cross section"""
+    I = coil._current.current
+    phi = coil.curve.quadpoints
+    N_phi = phi.shape[0]
+    _, n, b = coil.curve.frenet_frame()
+    kappa = coil.curve.kappa()
+
+    kappa_1 = kappa
+    kappa_2 = kappa
+    p = n
+    q = b
+
+    b_kappa = jnp.zeros((N_phi, 3))
+    b_b = jnp.zeros((N_phi, 3))
+    b_0 = jnp.zeros((N_phi, 3))
+
+    for i in range(N_phi):
+        b_b.at[i].set(kappa[i] * b[i] / 2 *
+                      (4 + 2*jnp.log(2) + jnp.log(delta(a, b))))
+        b_kappa.at[i].set(1 / 16 * (K(u - 1, v - 1, kappa_1[i], kappa_2[i], p[i], q[i], a, b) + K(u + 1, v + 1, kappa_1[i], kappa_2[i], p[i], q[i], a, b)
+                                    - K(u - 1, v + 1, kappa_1[i], kappa_2[i], p[i], q[i], a, b) - K(u + 1, v - 1, kappa_1[i], kappa_2[i], p[i], q[i], a, b)))
+        b_0.at[i].set(1 / (a * b) * ((G(b * (v - 1), a * (u - 1)) + G(b * (v + 1), a * (u + 1)) - G(b * (v + 1), a * (u - 1)) - G(b * (v - 1), a * (u + 1))) * q -
+                                     (G(a * (u - 1), b * (v - 1)) + G(a * (u + 1), b * (v + 1)) - G(a * (u - 1), b * (v + 1)) - G(a * (u - 1), b * (v + 1))) * p))
+
+    b_loc = constants.mu_0 * I / 4 / jnp.pi * (b_b + b_kappa + b_0)
+
+    return b_loc
+
+
+def field_from_other_coils(coil, coils):
+    """field on one coil from the other coils"""
+    gamma = coil.curve.gamma()
+    b_ext = BiotSavart(coils)
+    b_ext.set_points(gamma)
+    return b_ext.B()
+
+
+def field_from_other_coils_pure(gamma, curves, currents):
+    """field on one coil from the other coils"""
+    coils = [Coil(curve, current) for curve, current in zip(curves, currents)]
+    b_ext = BiotSavart(coils)
+    b_ext.set_points(gamma)
+    return b_ext.B()
+
+@jit
+def mutual_inductance(gamma_1, gammadash_1, gamma_2, gammadash_2):
+    r"""
+    Mutual inductance of two coils carrying a current.
+    """
+    r_c1 = gamma_1
+    r_c2 = gamma_2
+    rc_prime1 = gammadash_1 / jnp.pi / 2 # added 1/2 here
+    rc_prime2 = gammadash_2 / jnp.pi / 2 # added 1/2 here
+    n_quad_1 = gamma_1.shape[0]
+    n_quad_2 = gamma_2.shape[0]
+    dphi_1 = 2 * jnp.pi / n_quad_1
+    dphi_2 = 2 * jnp.pi / n_quad_2
+    double_integral = jnp.zeros(1)
+
+    integrand = jnp.zeros(n_quad_1)
+    for i in range(n_quad_1):
+        integrand = integrand.at[i].set( 
+                    jsp.integrate.trapezoid(jnp.dot( rc_prime2, rc_prime1[i])/(jnp.linalg.norm(r_c1 - r_c2[i], axis=1)), dx=dphi_1)
+                    )
+    double_integral = double_integral.at[0].set( jsp.integrate.trapezoid(integrand, dx=dphi_2) )
+    
+    return Biot_savart_prefactor * double_integral
+
+
+@jit
+def self_ind(gamma, gammadash, quadpoints, regularization):
+    r"""
+    Self inductance of a coil carrying a current.
+    """
+    double_integral = jnp.zeros(1)
+    phi = quadpoints * 2 * jnp.pi
+    r_c = gamma
+    rc_prime = gammadash / jnp.pi / 2 # added 1/2 here
+    n_quad = jnp.shape(phi)[0]
+    dphi = 2 * jnp.pi / n_quad
+    integrand = jnp.zeros(n_quad) 
+
+    for i in range(n_quad):
+        integrand = integrand.at[i].set( 
+                    jsp.integrate.trapezoid( jnp.dot(rc_prime, rc_prime[i]) / ( jnp.sqrt(jnp.linalg.norm(r_c - r_c[i], axis=1)**2 + regularization))    
+                                     ,dx = dphi) 
+                                     ) 
+    double_integral = double_integral.at[0].set(jsp.integrate.trapezoid(integrand, dx=dphi))
+    return Biot_savart_prefactor * double_integral
+
+
+# VECTORIZED METHODS
+def self_ind_vec(gamma, gammadash, quadpoints, regularization):
+    """
+    Self inductance of a coil carrying a current, optimized version.
+    """
+    dphi = 2 * jnp.pi / len(quadpoints)
+    rc_prime = gammadash / jnp.pi / 2 # added 1/2 here
+    r_c = gamma
+
+    # Compute the integrand in the form of a matrix
+    distance_matrix = jnp.sqrt(jnp.sum((r_c[:, None, :] - r_c[None, :, :]) ** 2, axis=-1) + regularization)
+    integrand_matrix = jnp.dot(rc_prime, rc_prime.T) / distance_matrix
+    
+    # Perform the double integral using vectorized operations
+    integral = jnp.sum(integrand_matrix * dphi, axis=1)
+    double_integral = jnp.sum(integral * dphi)
+    
+    return Biot_savart_prefactor * double_integral
+
+
+def mutual_inductance_vec(gamma_1, gammadash_1, gamma_2, gammadash_2):
+    """
+    Mutual inductance of two coils carrying a current, vectorized version.
+    """
+    r_c1 = jnp.array(gamma_1)
+    r_c2 = jnp.array(gamma_2)
+    rc_prime1 = jnp.array(gammadash_1) / jnp.pi / 2 # added 1/2 here
+    rc_prime2 = jnp.array(gammadash_2) / jnp.pi / 2 # added 1/2 here
+    dphi_1 = 2 * jnp.pi / r_c1.shape[0]
+    dphi_2 = 2 * jnp.pi / r_c2.shape[0]
+
+    # Compute the integrand in the form of a matrix
+    distance_matrix = jnp.sqrt(jnp.sum((r_c1[:, None, :] - r_c2[None, :, :]) ** 2, axis=-1))
+    integrand_matrix = jnp.dot(rc_prime2, rc_prime1.T) / distance_matrix
+
+
+    # Perform the double integration
+    integral = jnp.sum(integrand_matrix * dphi_1, axis=1)
+    double_integral = jnp.sum(integral * dphi_2)
+    
+    return Biot_savart_prefactor * double_integral
+
+
+
+
+
+#####################################################################################
+@jit
+def self_ind_accurate(gamma, gammadash, quadpoints, regularization):
+    r"""
+    More accurate computation of the self inductance from a coil carrying a current.
+    See Landreman - Hurwitz efficient calculation of self-force and self-field.
+    """
+    phi = quadpoints * 2 * jnp.pi
+    r_c = gamma
+    rc_prime = gammadash / 2 / jnp.pi 
+    n_quad = jnp.shape(phi)[0]
+    dphi = 2 * jnp.pi / n_quad
+    norm_rc_prime = jnp.linalg.norm(rc_prime, axis=1)
+    log_term = jnp.log(64 * norm_rc_prime * norm_rc_prime / regularization)
+    
+    integral_term = jnp.array([0.0])
+    double_integral_term = jnp.array([0.0])
+    integral_term = integral_term.at[0].set(jsp.integrate.trapezoid(norm_rc_prime*log_term, dx=dphi))
+
+    integrand = jnp.zeros(n_quad) 
+    for i in range(n_quad):
+        cos_fac = 2 - 2 * jnp.cos(phi[i] - phi)
+        integrand = integrand.at[i].set( \
+                    jsp.integrate.trapezoid( jnp.dot(rc_prime, rc_prime[i]) / ( jnp.sqrt(jnp.linalg.norm(r_c - r_c[i])**2 + regularization)) -  \
+                    (jnp.linalg.norm(rc_prime[i])**2)/(jnp.sqrt((cos_fac)*jnp.linalg.norm(rc_prime[i])**2 + regularization) )  ,dx = dphi) ) 
+    double_integral_term = double_integral_term.at[0].set(jsp.integrate.trapezoid(integrand, dx=dphi))
+    
+    return jnp.array([jnp.sum(jnp.array([integral_term , double_integral_term]))])
