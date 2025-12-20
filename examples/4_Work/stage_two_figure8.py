@@ -15,6 +15,7 @@ The target equilibrium is the QA configuration of arXiv:2108.03711.
 """
 
 import os, time, logging
+import gvec
 from pathlib import Path
 import numpy as np
 import simsopt
@@ -79,6 +80,85 @@ def flatten_point_data(curves, point_data, close=False):
 
     return flat
 
+def surf_to_xyzfourier(xyz_surf, 
+                         nfp,
+                         nphi=101,
+                         ntheta=102, 
+                         M=None,
+                         N=None, 
+                         stellsym=True, 
+                         tol=1e-8, 
+                         sign_rot=1,
+                         range='full torus'
+):
+    """
+    Converts a surface in cartesian coordinates with shape [0:nzeta*nfp,0:ntheta,0:2] 
+    to a SurfaceXYZFourier Simsopt object.
+
+    arguments:
+        - xyz_surf: Cartesian surface points [0:nzeta*nfp,0:ntheta,0:2] (full torus, excluding end point)
+        - nphi: nb of points in toroidal direction
+        - ntheta: nb of points in poloidal direction
+        - nfp: Number of field periods
+        - M: if None, minimal maximum poloidal mode number s.t the error is below the tolerance tol
+        - N: if None, minimal maximum toroidal mode number s.t the error is below the tolerance tol
+        - stellsym: Stellarator symmetry if True
+        - tol: Tolerance for the error associated to the minimal maximum mode numbers (M, N)
+        - sign_rot: direction of zeta for the rotation into hat coordinates, +1 or -1
+        - range: Range of which points are evaluated (e.g 'full torus' or 'half period')
+
+    returns:
+        - surf_xyzF_simsopt: SurfaceXYZFourier Simsopt object 
+    """
+
+    nz = xyz_surf.shape[0] // nfp
+    zeta = np.linspace(0, 2*np.pi / nfp, nz, endpoint=False)
+    xhat, yhat, zhat = gframe.xyz_to_xyz_hat(xyz_surf[0:nz,:,:], zeta, sign_rot=sign_rot)
+
+    # Defining poloidal & toroidal mode numbers
+    if (M==None and N==None):
+        Mmax, Nmax = gframe.minimal_modes(xhat.T,yhat.T,zhat.T,tolerance=tol)
+    else:
+        Mmax, Nmax = M, N
+
+    # Fourier transform
+    xhat_c, xhat_s = fourier.fft2d(xhat.T)
+    yhat_c, yhat_s = fourier.fft2d(yhat.T)
+    zhat_c, zhat_s = fourier.fft2d(zhat.T)
+    Mgrid, Ngrid = fourier.fft2d_modes(Mmax,Nmax,grid=True)
+
+    print(f"Surface mode numbers: M={Mmax}, N={Nmax}")
+
+    # Get Fourier modes
+    xhat_c = fourier.scale_modes2d(xhat_c, Mmax, Nmax)
+    xhat_s = fourier.scale_modes2d(xhat_s, Mmax, Nmax)
+    yhat_c = fourier.scale_modes2d(yhat_c, Mmax, Nmax)
+    yhat_s = fourier.scale_modes2d(yhat_s, Mmax, Nmax)
+    zhat_c = fourier.scale_modes2d(zhat_c, Mmax, Nmax)
+    zhat_s = fourier.scale_modes2d(zhat_s, Mmax, Nmax)
+
+    # Create SurfaceXYZFourier Simsopt object
+    surf_xyzF_simsopt = SurfaceXYZFourier.from_nphi_ntheta(nphi=nphi, ntheta=ntheta, range=range, 
+                                                           nfp=nfp, stellsym=stellsym, mpol=Mmax, ntor=Nmax)
+
+    # Associate modes as dofs
+    for m,n,xc,ys,zs in zip(Mgrid.flatten(),Ngrid.flatten(),xhat_c.flatten(),yhat_s.flatten(),zhat_s.flatten()):
+        if not(m==0 and n<0):
+            surf_xyzF_simsopt.set(f"xc({m},{n})",xc)
+            if not(m==0 and n==0):
+                surf_xyzF_simsopt.set(f"ys({m},{n})",ys)
+                surf_xyzF_simsopt.set(f"zs({m},{n})",zs)
+
+    # if not stellarator symmetric
+    if stellsym==False:
+        for m,n,xs,yc,zc in zip(Mgrid.flatten(),Ngrid.flatten(),xhat_s.flatten(),yhat_c.flatten(),zhat_c.flatten()):
+            if not(m==0 and n<0):
+                surf_xyzF_simsopt.set(f"yc({m},{n})",ys)
+                surf_xyzF_simsopt.set(f"zc({m},{n})",zs)
+                if not(m==0 and n==0):
+                    surf_xyzF_simsopt.set(f"xs({m},{n})",xc)
+
+    return surf_xyzF_simsopt
 # Number of unique coil shapes, i.e. the number of coils per half field period:
 # (Since the configuration has nfp, ntotal = ncoils*2*nfp to get the total number of coils.)
 ncoils = 4 # 4 QA
@@ -113,7 +193,7 @@ MSC_THRESHOLD = 5
 CL_THRESHOLD  = 35
 
 # Number of iterations to perform:
-MAXITER = 50 if in_github_actions else 100
+MAXITER = 50 if in_github_actions else 10
 SAVE_EVERY = 1
 
 # Bools 
@@ -136,6 +216,33 @@ os.makedirs(OUT_DIR, exist_ok=True)
 # End of input parameters.
 #######################################################
 
+# Loading state Figure-8
+state = gvec.State('parameter_NS_final.ini', 'NS_State_final.dat')
+
+# Evaluating the position at boundary (rho=1.0) 
+ev = state.evaluate('pos', 'mod_B', rho=1.0, theta=np.linspace(0, 2 * np.pi, 128), zeta=np.linspace(0, 2*np.pi, 20*state.nfp))
+
+# Loading the boundary geometry
+ev_bnd_2D = ev.sel(rho=1.0)
+bnd = ev_bnd_2D.pos
+
+# Transpose it so that if fits the shape for surf_to_xyzfourier
+bnd = bnd.transpose('tor', 'pol', 'xyz')
+
+# Converting into Simsopt object
+xyz_simsopt = surf_to_xyzfourier(bnd, state.nfp, range='full torus', tol=1e-8)
+xyz_simsopt.to_vtk('figure_8shape')
+
+base_curves = create(state=state, ncoils=7, nfp=state.nfp, order=25, scale_fact=1.3)
+print(len(base_curves))
+#base_curves = create_equally_spaced_curves(ncoils, s.nfp, stellsym=True, R0=R0, R1=R1, order=order)
+
+# Creates initial current:
+base_currents = [Current(1e5) for i in range(7)]
+base_currents[0].fix_all()
+
+# Generate all coils via stellarator and field-period symmetry
+coils = coils_via_symmetries(base_curves, base_currents, xyz_simsopt.nfp, True)
 # Initialize the boundary magnetic surface:
 nphi = 128  
 ntheta = 128
@@ -306,6 +413,7 @@ def write_pvd( directory, filename="coils.pvd",pattern="coils_iter_", ext=".vtp"
         f.write('  </Collection>\n')
         f.write('</VTKFile>\n')
 
+
 if run_opt:
     print("""
     ################################################################################
@@ -315,16 +423,15 @@ if run_opt:
 
     # Save initial state (circular coils, before any step)
     iter_counter = 0
-    #dofs0 = JF.x.copy()
-    dofs = JF.x 
-    #JF.x = dofs0
+    dofs0 = JF.x.copy()
+    JF.x = dofs0
     save_coils(iter_counter)
     iter_counter += 1
 
     # Run optimizer
     res = minimize(
         fun,
-        dofs,
+        dofs0,
         jac=True,
         method="L-BFGS-B",
         callback=optimization_callback,
