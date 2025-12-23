@@ -15,13 +15,12 @@ The target equilibrium is the QA configuration of arXiv:2108.03711.
 """
 
 import os, time, logging
-from simsopt._core import load
 from pathlib import Path
 import numpy as np
 from scipy.optimize import minimize
 from simsopt.field import (InterpolatedField, SurfaceClassifier, LevelsetStoppingCriterion, BiotSavart, Current,
                             particles_to_vtk, compute_fieldlines, plot_poincare_line, coils_via_symmetries)
-from simsopt.geo import (SurfaceRZFourier, curves_to_vtk, create_equally_spaced_curves,
+from simsopt.geo import (SurfaceRZFourier, curves_to_vtk, create_equally_spaced_planar_curves,
                          CurveLength, MeanSquaredCurvature,ArclengthVariation, CurveCurveDistance, MeanSquaredCurvature,
                          LpCurveCurvature, CurveSurfaceDistance, LinkingNumber)
 from simsopt.objectives import Weight, SquaredFlux, QuadraticPenalty
@@ -89,17 +88,17 @@ dim = 0.01
 regularization = regularization_rect(dim,dim)
 
 # Weights
-FLUX_WEIGHT = Weight(5e2)
-LENGTH_WEIGHT = Weight(1e-4) # wl 4e-5 we = 1e-11 
-ENERGY_WEIGHT   = Weight(3e-10)  #1e-11
+FLUX_WEIGHT = Weight(1e4)
+LENGTH_WEIGHT = Weight(0.0) # wl 4e-5 we = 1e-11 
+ENERGY_WEIGHT   = Weight(5e-10)  #1e-11
 WEIGHT_SELF = Weight(0.0)
 WEIGHT_MUTUAL = Weight(0.0)
 
-ARCLENGTH_WEIGHT = Weight(1e-2) # 1e-6
-CC_WEIGHT = Weight(10)
+ARCLENGTH_WEIGHT = Weight(0.0) # 1e-6
+CC_WEIGHT = Weight(100)
 CS_WEIGHT = Weight(100)
-LINK_WEIGHT = Weight(10)
-CURVATURE_WEIGHT = Weight(0.0)
+LINK_WEIGHT = Weight(100)
+CURVATURE_WEIGHT = Weight(10)
 MSC_WEIGHT = Weight(0.0)
 
 # Thresholds
@@ -117,9 +116,9 @@ SAVE_EVERY = 1
 # Bools 
 taylor = False
 animate = False
-run_opt = False
+run_opt = True
 compute_forces = False
-make_p2 = True
+make_p2 = False
 init_guess = False
 
 # File for the desired boundary magnetic surface:
@@ -136,15 +135,16 @@ os.makedirs(OUT_DIR, exist_ok=True)
 # Initialize the boundary magnetic surface:
 nphi = 128  
 ntheta = 128
-s = SurfaceRZFourier.from_vmec_input(filename, range="half period", nphi=nphi, ntheta=ntheta)
+s = SurfaceRZFourier.from_vmec_input(filename, range="full torus", nphi=nphi, ntheta=ntheta)
 nfp = s.nfp
 
 # Initialize the coils:
-base_curves = create_equally_spaced_curves(ncoils, s.nfp, stellsym=True, R0=R0, R1=R1,
-                                            order=order, numquadpoints=25*order)
+#base_curves = create_equally_spaced_curves(ncoils, s.nfp, stellsym=True, R0=R0, R1=R1,
+#                                            order=order, numquadpoints=25*order)
+base_curves = create_equally_spaced_planar_curves(ncoils, s.nfp, stellsym=True, R0=R0, R1=R1, order=order,
+                                                   numquadpoints=25*order)
 base_currents = [Current(1e5) for _ in range(ncoils)]
-#[base_currents[i].fix_all() for i in range(ncoils)]
-base_currents[0].fix_all()
+[base_currents[i].fix_all() for i in range(ncoils)]
 coils = coils_via_symmetries(base_curves, base_currents, s.nfp, True)
 bs = BiotSavart(coils)
 bs.set_points(s.gamma().reshape((-1, 3)))
@@ -313,7 +313,7 @@ if run_opt:
     ################################################################################
     """)
 
-    dofs = JF.x
+    dofs = JF.x 
     # Run optimizer
     if animate:
         # Save initial state (circular coils, before any step)
@@ -355,6 +355,11 @@ if run_opt:
         print("Saved visualization configuration for paraview animation.")
         write_pvd(OUT_DIR)
 
+    # BdotN = np.abs(np.sum(bs.B().reshape((nphi, ntheta, 3)) * s.unitnormal(), axis=2))
+    # BdotNoverB = BdotN/ np.linalg.norm(bs.B().reshape((nphi, ntheta, 3)), axis=2)[:, :, None]
+    # BdotNoverB_abs = np.abs(BdotN)/ np.linalg.norm(bs.B().reshape((nphi, ntheta, 3)), axis=2)[:, :, None]
+    # pointData = {"B_N/B": BdotNoverB, "B_N": BdotN, "|B_N|/B":BdotNoverB_abs}
+
     B = bs.B().reshape((nphi, ntheta, 3))
     nhat = s.unitnormal()
     BdotN = np.sum(B * nhat, axis=2)             
@@ -376,8 +381,6 @@ if run_opt:
     }
     curves_to_vtk(curves[0:ncoils], OUT_DIR + "curves_opt_filam", close=True, 
               extra_data=flatten_point_data(curves[:ncoils], force_dict, close=True))
-    coils_to_rectangular_vtk(coils[0:ncoils], OUT_DIR + "curves_opt_rect_halfFP.vtp", w=0.4, h=0.4, 
-                             planar = False, extra_data=extra_data, useRMF=False)
     coils_to_rectangular_vtk(coils, OUT_DIR + "curves_opt_rect.vtp", w=0.4, h=0.4, 
                              planar = False, extra_data=extra_data, useRMF=False)
     print("coils saved to files" + "curves_opt_filam" + " and " + "curves_opt_rect.vtp")
@@ -404,18 +407,18 @@ if make_p2:
     logger.setLevel(1)
 
     # If we're in the CI, make the run a bit cheaper:
-    nfieldlines = 2 if in_github_actions else 2 
-    tmax_fl = 10000 if in_github_actions else 3000
-    degree = 2 if in_github_actions else 2
+    nfieldlines = 3 if in_github_actions else 12 
+    tmax_fl = 10000 if in_github_actions else 30000
+    degree = 2 if in_github_actions else 4
 
     # Load in the optimized coils from stage_two_optimization.py:
     coils_filename = OUT_DIR + "biot_savart_opt.json"
-    bs = load(coils_filename)
+    bs = simsopt.load(coils_filename)
 
     sc_fieldline = SurfaceClassifier(s, h=0.03, p=2)
     sc_fieldline.to_vtk(OUT_DIR + 'levelset', h=0.02)
 
-    nplot_fieldlines = 2
+    nplot_fieldlines = 3
     def trace_fieldlines(bfield, label):
         t1 = time.time()
         # Set initial grid of points for field line tracing, going from
@@ -423,16 +426,12 @@ if make_p2:
         # at R=1.300425, but the outermost initial point is a bit inward
         # from that, R = 1.295, so the SurfaceClassifier does not think we
         # have exited the surface
-        #R0 = np.linspace(1.2125346, 1.295, nfieldlines)
-        R0 = np.linspace(13.6745 + 0.05, 17.8263 - 0.05, nfieldlines)
+        R0 = np.linspace(1.2125346, 1.295, nfieldlines)
         Z0 = np.zeros(nfieldlines)
-        phis = [0, np.pi/2] #[(i/nplot_fieldlines)*(2*np.pi/nfp) for i in range(nplot_fieldlines)]
+        phis = [0,np.pi/4, np.pi/2] #[(i/nplot_fieldlines)*(2*np.pi/nfp) for i in range(nplot_fieldlines)]
         fieldlines_tys, fieldlines_phi_hits = compute_fieldlines(
-            bfield, R0, Z0, tmax=tmax_fl, tol=1e-8, comm=comm_world,
+            bfield, R0, Z0, tmax=tmax_fl, tol=1e-16, comm=comm_world,
             phis=phis, stopping_criteria=[LevelsetStoppingCriterion(sc_fieldline.dist)])
-        # fieldlines_tys, fieldlines_phi_hits = compute_fieldlines(
-        #     bfield, R0, Z0, tmax=tmax_fl, tol=1e-8, comm=comm_world,
-        #     phis=phis)
         t2 = time.time()
         proc0_print(f"Time for fieldline tracing={t2-t1:.3f}s. Num steps={sum([len(l) for l in fieldlines_tys])//nfieldlines}", flush=True)
         if comm_world is None or comm_world.rank == 0:
@@ -488,79 +487,26 @@ if make_p2:
     proc0_print("========================================")
 
 if init_guess:
-    class StopOptimization(RuntimeError):
-        pass
-
-    IMAX = 5.0e5
-
-    def stop_if_highCurr(xk):
-        JF.x = xk
-        currents = np.array([I.get_value() for I in base_currents])
-        if np.max(np.abs(currents)) > IMAX:
-            raise StopOptimization
-
-    for c in base_curves:
-        c.fix_all()
-    for I in base_currents:
-        I.unfix_all()
-    # Rebuild Biot–Savart (currents are now DOFs)
-    bs = BiotSavart(coils)
-    bs.set_points(s.gamma().reshape((-1, 3)))
-
-    # Rebuild SquaredFlux
-    Jf = SquaredFlux(s, bs)
-
-    # Rebuild composite objective
-    JF = FLUX_WEIGHT * Jf \
-        + ARCLENGTH_WEIGHT * sum(Ja) \
-        + WEIGHT_SELF * sum(Jself) \
-        + WEIGHT_MUTUAL * sum(Jmutual) \
-        + LENGTH_WEIGHT * sum(QuadraticPenalty(J, CL_THRESHOLD, "max") for J in Jls) \
-        + ENERGY_WEIGHT * sum(Jenergy)
-
-    # Add optional penalties again
-    if CS_WEIGHT.value != 0:
-        JF += CS_WEIGHT * Jcsdist
-    if CC_WEIGHT.value != 0:
-        JF += CC_WEIGHT * Jccdist
-    if LINK_WEIGHT.value != 0:
-        JF += LINK_WEIGHT * QuadraticPenalty(Jlink, LINK_THRESHOLD, "max")
-
     # Use result as initial guess for reduced length penalty. Slightly longer coils but smaller `B·n` on the surface.
-    dofs = JF.x.copy()
-    print("Starting second optimization with free currents") 
-    try:
-        res = minimize(fun, dofs, jac=True, method='L-BFGS-B',
-                       callback=stop_if_highCurr,
-                        options={'maxiter': MAXITER, 'maxcor': 300, 'disp': False, 'gtol':1e-4}, tol=1e-15)
-        stopped_early = False
-    except StopOptimization:
-        print("Optimization stopped early due to current limit.")
-        stopped_early = True
+    dofs = res.x
+    ENERGY_WEIGHT = Weight(1e-9)
+    print("Starting second optimization with reduced penalty w_L = " + f"{LENGTH_WEIGHT.__float__()}") 
+    res = minimize(fun, dofs, jac=True, method='L-BFGS-B', options={'maxiter': MAXITER, 'maxcor': 300}, tol=1e-15)
 
     # Save results second opti
-    B = bs.B().reshape((nphi, ntheta, 3))
-    nhat = s.unitnormal()
-    BdotN = np.sum(B * nhat, axis=2)             
-    B_mag = np.linalg.norm(B, axis=2)            
-    BdotNoverB = BdotN / B_mag                    
-    BdotNoverB_abs = np.abs(BdotNoverB)         
-    pointData = {"B_N/B": BdotNoverB[:, :, None], "B_N": BdotN[:, :, None],
-                  "|B_N|/B":BdotNoverB_abs[:, :, None]}
-    
-    print("Final currents:", [I.get_value() for I in base_currents])
+    curves_to_vtk(curves, OUT_DIR + f"curves_opt_long_indiv", close=True, extra_data=pointData_forces(coils))
+    pointData = {"B_N": np.sum(bs.B().reshape((nphi, ntheta, 3)) * s.unitnormal(), axis=2)[:, :, None]}
+    s.to_vtk(OUT_DIR + "surf_opt_long_indiv", extra_data=pointData)
+    bs.save(OUT_DIR + "biot_savart_opt_indiv.json")
 
-    s.to_vtk(OUT_DIR + "surf_opt_long", extra_data=pointData)
-    print("Surf saved to file: " +  OUT_DIR + "surf_opt_long.vts")
-    bs.save(OUT_DIR + "biot_savart_long.json")
-    print("Biot Savart saved to file: " + OUT_DIR + "biot_savart_long.json")
-    force_dict = pointData_forces(coils, regularization)
-    extra_data = {
-        **force_dict,
-        "coil_id": [i * np.ones(len(coils[i].curve.gamma())) for i in range(len(coils))]
-    }
-    curves_to_vtk(curves[0:ncoils], OUT_DIR + "curves_opt_long_filam", close=True, 
-              extra_data=flatten_point_data(curves[:ncoils], force_dict, close=True))
-    coils_to_rectangular_vtk(coils, OUT_DIR + "curves_opt_long_rect.vtp", w=0.4, h=0.4, 
-                             planar = False, extra_data=extra_data, useRMF=False)
-    print("coils saved to files" + "curves_opt_long_filam" + " and " + "curves_opt_long_rect.vtp")
+    f_int_max = np.zeros((2,ncoils))
+
+    for i in range(ncoils):
+        f_int_max[0,i] = np.max(np.linalg.norm(coil_force(coils[i], coils, regularization), axis=1))
+        arc_length = np.linalg.norm(coils[i].curve.gammadash(), axis=1)
+        f_int_max[1,i] = 1/CurveLength(coils[i].curve).J() * np.mean(np.linalg.norm(coil_force(coils[i], coils, regularization), axis=1) * arc_length)
+
+    print("Forces on the obtained coils")
+    print(["coil " + f'{i+1}' for i in range(ncoils)])
+    print('max force:' +f"{f_int_max[0,:]}")
+    print('integrated force:' +f"{f_int_max[1,:]}")

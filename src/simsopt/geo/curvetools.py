@@ -1,24 +1,30 @@
 import numpy as np
+from simsopt.geo.framedcurve import FramedCurveCentroid
 import vtk
 
 __all__ = ["coils_to_rectangular_vtk"]
 
 def wrap(data):
+    """
+    function that wrap any dataset by concatenating the first datapoint at the end.
+    """
     return np.concatenate([data, [data[0]]])
 
-
-## Rotation Minimizing Frame helpers
-
-# tangent
 def unit_tangents(gamma):
+    """
+    Function that returns the unit tangents to a curve gamma. 
+    """
     g = np.asarray(gamma, float)
     d = np.gradient(g, axis=0)
     d /= np.linalg.norm(d, axis=1)[:, None]
     return d
 
-# normal
 def choose_initial_normal(t0):
-    # pick a stable normal not parallel to t0
+    """
+    Find a suitable inital normal vector
+    to the curve whose tangent at a given point is the input
+    t0
+    """
     v = np.array([0.0, 0.0, 1.0])
     if abs(np.dot(v, t0)) > 0.9:
         v = np.array([0.0, 1.0, 0.0])
@@ -41,6 +47,10 @@ def best_fit_plane_normal(gamma):
     return n_plane / np.linalg.norm(n_plane)
 
 def choose_n0_planar(gamma, t0):
+    """
+    Choose an appropriate normal vector 
+    to a planar curve (for Bishop frame only).
+    """
     b0 = best_fit_plane_normal(gamma)
     # ensure b0 not parallel to t0
     if abs(np.dot(b0, t0)) > 0.9:
@@ -54,7 +64,6 @@ def choose_n0_planar(gamma, t0):
     n0 = np.cross(b0, t0)
     return n0 / np.linalg.norm(n0)
 
-# Rotation Minimizing Frame
 def rmf_parallel_transport(gamma):
     """
     Rotation-minimizing frame (Bishop/parallel transport).
@@ -90,11 +99,14 @@ def rmf_parallel_transport(gamma):
 
     return t, n, b
 
-# Rotation Minimizing Frame (For planar coils)
 def rmf_parallel_transport_planar(gamma):
     """
     Rotation-minimizing frame (Bishop/parallel transport).
-    Returns unit tangents t, normals n, binormals b for each point.
+    
+    Args: 
+        gamma: curve endpoints
+    Returns:
+        unit tangent t, normal n, and binormal b at each point.
     """
     g = np.asarray(gamma, float)
     t = unit_tangents(g)
@@ -126,10 +138,14 @@ def rmf_parallel_transport_planar(gamma):
 
     return t, n, b
 
-# close RMF in a periodic way (only if tangent match at endpoints)
+
 def close_rmf(t, n, b):
     """
-    Make RMF periodic by distributing the end-frame mismatch.
+    Make RMF periodic by distributing the end-frame mismatch along the curve. 
+    Introduce a non-physical rotation, for visualization only. 
+
+    Args: 
+    t,n,b: frame tangent, normal and binormal vectors respectively. 
     """
     n0, b0 = n[0], b[0]
     n1, b1 = n[-1], b[-1]
@@ -148,8 +164,22 @@ def close_rmf(t, n, b):
 
     return t, n2, b2
 
-# Sweep rectangle along the curve such that sides are aligned with RMF
-def sweep_rectangle_rmf(gamma, n, b, w=0.5, h=0.5, extra_data=None):
+
+def sweep_rectangle_centroid(gamma, n, b, w=0.5, h=0.5, extra_data=None):
+    """
+    This function returns a swept rectangular section of custom width and height along 
+    a given frame of a curve. The frame is specified by n and b, and can be RMF or Centroid.
+
+    Args:
+        gamma: the curve quadpoints.
+        n,b: normal and binormal vectors, respectively, of the frame.
+        w,h: width and height of the rectangular cross section.
+        extra_data (Optional): extra data to add to the curve 
+                                to visualize in Paraview. 
+
+    Returns:
+        A set of polyData for Paraview
+    """
     rect = np.array([[-w/2, -h/2],
                      [ w/2, -h/2],
                      [ w/2,  h/2],
@@ -216,16 +246,16 @@ def sweep_rectangle_rmf(gamma, n, b, w=0.5, h=0.5, extra_data=None):
     poly.Modified()
     return poly
 
-# save the coils
+
 def coils_to_rectangular_vtk(
     coils,
     filename,
     w=0.3,
     h=0.3,
-    planar = True,
+    planar = False,
     extra_data = None,
-    use_close_rmf=True,
-    verbose=True,
+    useRMF=False,
+    verbose=False,
 ):
     """
     Export coils as swept rectangular solids using a rotation-minimizing frame.
@@ -249,46 +279,39 @@ def coils_to_rectangular_vtk(
         Output VTK filename (e.g. "curves_final_rect.vtp").
     w, h : float
         Width and height of the rectangular coil cross-section.
-    use_close_rmf : bool, optional
-        Whether to apply close_rmf to the RMF.
-        Has no visual effect if the curve is not C¹-periodic.
+    planar : bool, optional 
+        Wether the coil is planar or not (only relevant for RMF)
+    useRMF : bool, optional
+        Whether to choose the RMF or not (RMF is faster than centroid frame).
     verbose : bool, optional
         If True, print tangent mismatch diagnostics.
 
     Notes
     -----
     This function is intended for *visualization only*.
-    The use of wrap() introduces a tangent mismatch at the seam, which is
-    acceptable for plotting but should not be used for geometry-sensitive
-    computations.
     """
-    import vtk
-    import numpy as np
 
     append = vtk.vtkAppendPolyData()
-
-    def wrap(data):
-        return np.concatenate([data, [data[0]]])
 
     curves = [coil.curve for coil in coils]
 
     for i, c in enumerate(curves[:len(coils)]):
-        gamma = c.gamma() #wrap(c.gamma())
+        fc = FramedCurveCentroid(c)
+        gamma = c.gamma() 
 
         # RMF construction
-        if planar:
-            t, n, b = rmf_parallel_transport_planar(gamma)
+        if useRMF:
+            if planar:
+                t, n, b = rmf_parallel_transport_planar(gamma)
+            else: 
+                t, n, b = rmf_parallel_transport(gamma)
         else:
-            t, n, b = rmf_parallel_transport(gamma)
-        if use_close_rmf:
-            t, n, b = close_rmf(t, n, b)
+            t, n, b = fc.rotated_frame() 
 
         # Tangent mismatch diagnostic (purely informational)
         if verbose:
-            t0 = gamma[1] - gamma[0]
-            t0 /= np.linalg.norm(t0)
-            t1 = gamma[-1] - gamma[-2]
-            t1 /= np.linalg.norm(t1)
+            t0 = t[0]
+            t1 = t[-1]
             angle = np.degrees(
                 np.arccos(np.clip(np.dot(t0, t1), -1.0, 1.0))
             )
@@ -308,7 +331,7 @@ def coils_to_rectangular_vtk(
                 # Each curve point generates 4 surface points
                 surface_extra_data[name] = np.repeat(data_curve, 4)
 
-        poly = sweep_rectangle_rmf(
+        poly = sweep_rectangle_centroid(
             gamma,
             n,
             b,

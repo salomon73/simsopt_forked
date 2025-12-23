@@ -187,6 +187,6 @@ coils_to_rectangular_vtk([coils[i] for i in planar_idx], OUT_DIR + "curves_W7X_p
 coils_to_rectangular_vtk([coils[i] for i in nonplanar_idx], OUT_DIR + "curves_W7X_nonplanar_rect.vtp", w=0.3, h=0.3, 
                             planar = False, extra_data=nonplanar_extra_data, use_close_rmf=True, verbose=True)
 
-
+print("currents = "+ f"{(curr for curr in currents)}")
 
 
