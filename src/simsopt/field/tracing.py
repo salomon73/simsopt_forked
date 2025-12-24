@@ -948,8 +948,15 @@ def plot_poincare_line(fieldlines_phi_hits, phis, filename, mark_lost=False, asp
     from math import ceil, sqrt
     
     nphis = len(phis)
-    # Define overall figure size and subplot layout
-    fig, axs = plt.subplots(1, nphis, figsize=(14, 4))  # 1 row, 3 columns
+    nphis = len(phis)
+
+    if nphis == 4:
+        fig, axs = plt.subplots(2, 2, figsize=(8, 8))
+        axs = axs.ravel()
+    else:
+        fig, axs = plt.subplots(1, nphis, figsize=(4*nphis, 4))
+        if nphis == 1:
+            axs = [axs]
     for ax in axs:
         ax.set_aspect(aspect)  # Maintain consistent aspect ratio
         ax.set_box_aspect(1)
@@ -961,9 +968,9 @@ def plot_poincare_line(fieldlines_phi_hits, phis, filename, mark_lost=False, asp
         #breakpoint()
         if i != len(phis) - 1:
             #breakpoint()
-            axs[col].set_title(f"$\\phi = {phis[i]/np.pi:.2f}$ ", loc='left', y=0.0)
+            axs[col].set_title(f"$\\phi = {phis[i]/np.pi:.2f}\\pi$ ", loc='left', y=0.0)
         else:
-            axs[col].set_title(f"$\\phi = {phis[i]/np.pi:.2f}$ ", loc='right', y=0.0)
+            axs[col].set_title(f"$\\phi = {phis[i]/np.pi:.2f}\\pi$ ", loc='right', y=0.0)
        
         axs[col].set_xlabel("$R$", fontsize=16)
         axs[col].set_ylabel("$Z$", fontsize=16)
@@ -985,7 +992,7 @@ def plot_poincare_line(fieldlines_phi_hits, phis, filename, mark_lost=False, asp
 
         # if passed a surface, plot the plasma surface outline
         if surf is not None:
-            cross_section = surf.cross_section(phi=phis[i])
+            cross_section = surf.cross_section(phi=phis[i]/ (2.0*np.pi))
             r_interp = np.sqrt(cross_section[:, 0] ** 2 + cross_section[:, 1] ** 2)
             z_interp = cross_section[:, 2]
             axs[col].plot(r_interp, z_interp, linewidth=1, c='r')
