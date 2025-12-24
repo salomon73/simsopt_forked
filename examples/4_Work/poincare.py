@@ -11,7 +11,7 @@ from simsopt.field import (
     SurfaceClassifier,
     LevelsetStoppingCriterion,
     compute_fieldlines,
-    plot_poincare_data,
+    plot_poincare_line,
 )
 
 # ==============================================================================
@@ -48,7 +48,7 @@ nPhi   = 96
 
 # Surface sampling for geometry
 nphi_geom   = 256
-ntheta_geom = 128
+ntheta_geom = 256
 
 # ==============================================================================
 # Logging (simsopt internal)
@@ -268,13 +268,6 @@ if rank == 0:
     # 9. Plot Poincaré
     # ==============================================================================
     proc0_print("Plotting Poincaré")
-    plot_poincare_data(
-        fieldlines_phi_hits,
-        phis,
-        OUT_DIR / "poincare.pdf",
-        dpi=300,
-        surf=s,
-        marker=".",
-    )
+    plot_poincare_line(fieldlines_phi_hits, phis, OUT_DIR / "poincare_fieldlines.pdf", dpi=300, surf=s, marker='.')
     proc0_print("Saved:", OUT_DIR / "poincare.pdf")
 
